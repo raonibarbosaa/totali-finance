@@ -65,7 +65,14 @@ export default function Lancamentos() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page, limit: LIMIT });
-      Object.entries(filtros).forEach(([k, v]) => { if (v) params.set(k, v); });
+      Object.entries(filtros).forEach(([k, v]) => {
+        if (!v) return;
+        if (k === 'dataInicio') params.set('dateFrom', v);
+        else if (k === 'dataFim') params.set('dateTo', v);
+        else if (k === 'bankAccountId') params.set('bankAccountId', v);
+        else if (k === 'categoryId') params.set('categoryId', v);
+        else params.set(k, v);
+      });
 
       const { data } = await api.get(`/transactions?${params}`);
       const items = data.data?.data || data.data?.transactions || [];
