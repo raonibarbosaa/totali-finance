@@ -194,9 +194,7 @@ export default function AdminUsuarios() {
       <Modal open={modal} onClose={() => setModal(false)} title="Novo usuário Totali">
         <div className="space-y-4">
           <div>
-            <label className="input-label">Nome completo *</label>
-            <input className="input-field" value={form.nome}
-              onChange={e => setForm({ ...form, nome: e.target.value })} />
+
           </div>
           <div>
             <label className="input-label">E-mail *</label>
@@ -210,6 +208,9 @@ export default function AdminUsuarios() {
               placeholder="Mínimo 8 caracteres" />
           </div>
           <div>
+            <label className="input-label">Nome completo *</label>
+            <input className="input-field" placeholder="Nome do usuário" value={form.nome}
+              onChange={e => setForm({ ...form, nome: e.target.value })} />
             <label className="input-label">Perfil</label>
             <select className="input-field" value={form.perfil}
               onChange={e => setForm({ ...form, perfil: e.target.value })}>
