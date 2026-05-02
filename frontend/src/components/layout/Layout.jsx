@@ -34,8 +34,8 @@ export default function Layout() {
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Header title={title} />
-        <main className="flex-1 p-6 overflow-auto bg-slate-50">
-          <div className="animate-fade-in max-w-7xl">
+        <main className="flex-1 p-6 bg-slate-50" style={{overflowY:"auto"}}>
+          <div className="animate-fade-in max-w-7xl" style={{position:"relative"}}>
             <Outlet />
           </div>
         </main>

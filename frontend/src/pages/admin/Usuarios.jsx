@@ -6,16 +6,14 @@ import { nomePerfil, nomeRole } from '../../utils/formatters';
 function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 overflow-y-auto">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fade-in max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-          <h3 className="font-display font-semibold text-navy-800">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={18} />
-          </button>
+    <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+      <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)'}} onClick={onClose} />
+      <div style={{position:'relative',background:'white',borderRadius:'16px',boxShadow:'0 25px 50px rgba(0,0,0,0.25)',width:'100%',maxWidth:'480px',maxHeight:'85vh',display:'flex',flexDirection:'column'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 24px',borderBottom:'1px solid #e2e8f0',flexShrink:0}}>
+          <h3 style={{fontWeight:600,color:'#1e293b',margin:0}}>{title}</h3>
+          <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',color:'#94a3b8',fontSize:'20px',lineHeight:1}}>✕</button>
         </div>
-        <div className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
+        <div style={{padding:'20px 24px',overflowY:'auto',flex:1}}>{children}</div>
       </div>
     </div>
   );
