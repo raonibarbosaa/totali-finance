@@ -61,10 +61,16 @@ export default function DashboardCliente() {
     async function load() {
       try {
         const [statsRes, titulosRes] = await Promise.all([
-          hasRole(2) ? api.get('/dashboard/stats') : Promise.resolve({ data: { data: null } }),
+          api.get('/dashboard/stats'),
           api.get('/titles?status=aberto&limit=8&orderBy=dataVencimento'),
         ]);
-        setStats(statsRes.data.data);
+        const raw = statsRes.data.data;
+        setStats(raw ? {
+          receitasMes: raw.receitas || 0,
+          despesasMes: raw.despesas || 0,
+          saldoTotal: raw.saldoTotal || 0,
+          titulosAVencer: raw.titulosVencer || 0,
+        } : null);
         setTitulos(titulosRes.data.data?.titles || []);
       } catch (_) {}
       setLoading(false);
