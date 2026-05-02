@@ -54,18 +54,6 @@ app.use('/api/users', userRoutes);
 
 // ── 404 ───────────────────────────────────────────────
 
-const bankAccountsRoutes = require('./modules/bank-accounts/bank-accounts.routes');
-const categoriesRoutes = require('./modules/categories/categories.routes');
-const ofxPatternsRoutes = require('./modules/ofx-patterns/ofx-patterns.routes');
-const companySettingsRoutes = require('./modules/company-settings/company-settings.routes');
-const transactionsRoutes = require('./modules/transactions/transactions.routes');
-const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
-app.use('/api/bank-accounts', bankAccountsRoutes);
-app.use('/api/categories', categoriesRoutes);
-app.use('/api/ofx-patterns', ofxPatternsRoutes);
-app.use('/api/company-settings', companySettingsRoutes);
-app.use('/api/transactions', transactionsRoutes);
-app.use('/api/dashboard', dashboardRoutes);
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'Rota não encontrada.' });
 });
