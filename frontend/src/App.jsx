@@ -58,4 +58,8 @@ export default function App() {
           <Route path="fechamentos" element={<AdminFechamentosPage />} />
         </Route>
         <Route path="/" element={<Navigate to="/login" replace />} />
-        <Rou
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

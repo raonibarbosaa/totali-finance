@@ -15,7 +15,7 @@ function Modal({ open, onClose, title, children }) {
             <X size={18} />
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
+        <div className="px-6 py-5 overflow-y-auto max-h-[70vh]">{children}</div>
       </div>
     </div>
   );
