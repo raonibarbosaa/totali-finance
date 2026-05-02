@@ -1,0 +1,14 @@
+const express = require('express');
+const router = express.Router();
+const auth   = require('../../middleware/auth');
+const tGuard = require('../../middleware/tenantGuard');
+const rGuard = require('../../middleware/roleGuard');
+const ctrl   = require('./bank-accounts.controller');
+router.use(auth, tGuard);
+router.get('/',            rGuard([1,2]), ctrl.list);
+router.get('/:id',         rGuard([1,2]), ctrl.findOne);
+router.get('/:id/balance', rGuard([1,2]), ctrl.balance);
+router.post('/',           rGuard([1]),   ctrl.create);
+router.put('/:id',         rGuard([1]),   ctrl.update);
+router.delete('/:id',      rGuard([1]),   ctrl.remove);
+module.exports = router;

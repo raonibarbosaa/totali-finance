@@ -1,0 +1,13 @@
+const express = require('express');
+const router = express.Router();
+const auth   = require('../../middleware/auth');
+const tGuard = require('../../middleware/tenantGuard');
+const rGuard = require('../../middleware/roleGuard');
+const pGuard = require('../../middleware/periodGuard');
+const ctrl   = require('./transactions.controller');
+router.use(auth, tGuard);
+router.get('/',       rGuard([1,2]),   ctrl.list);
+router.post('/',      rGuard([1,2,3]), pGuard, ctrl.create);
+router.put('/:id',    rGuard([1,2,3]), pGuard, ctrl.update);
+router.delete('/:id', rGuard([1,2,3]), pGuard, ctrl.remove);
+module.exports = router;

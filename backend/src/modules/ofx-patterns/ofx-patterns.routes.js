@@ -1,0 +1,12 @@
+const express = require('express');
+const router = express.Router();
+const auth   = require('../../middleware/auth');
+const tGuard = require('../../middleware/tenantGuard');
+const rGuard = require('../../middleware/roleGuard');
+const ctrl   = require('./ofx-patterns.controller');
+router.use(auth, tGuard, rGuard([1]));
+router.get('/',       ctrl.list);
+router.post('/',      ctrl.create);
+router.put('/:id',    ctrl.update);
+router.delete('/:id', ctrl.remove);
+module.exports = router;

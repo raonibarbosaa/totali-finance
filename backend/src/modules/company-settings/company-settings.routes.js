@@ -1,0 +1,10 @@
+const express = require('express');
+const router = express.Router();
+const auth   = require('../../middleware/auth');
+const tGuard = require('../../middleware/tenantGuard');
+const rGuard = require('../../middleware/roleGuard');
+const ctrl   = require('./company-settings.controller');
+router.use(auth, tGuard, rGuard([1]));
+router.get('/', ctrl.get);
+router.put('/', ctrl.update);
+module.exports = router;
