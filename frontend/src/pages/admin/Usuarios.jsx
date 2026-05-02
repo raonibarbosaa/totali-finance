@@ -6,7 +6,7 @@ import { nomePerfil, nomeRole } from '../../utils/formatters';
 function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+    <div style={{position:'fixed',top:0,left:0,width:'100vw',height:'100vh',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:'24px',boxSizing:'border-box'}}>
       <div style={{position:'absolute',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)'}} onClick={onClose} />
       <div style={{position:'relative',background:'white',borderRadius:'16px',boxShadow:'0 25px 50px rgba(0,0,0,0.25)',width:'100%',maxWidth:'480px',maxHeight:'85vh',display:'flex',flexDirection:'column'}}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 24px',borderBottom:'1px solid #e2e8f0',flexShrink:0}}>
