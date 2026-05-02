@@ -68,7 +68,7 @@ export default function Lancamentos() {
       Object.entries(filtros).forEach(([k, v]) => { if (v) params.set(k, v); });
 
       const { data } = await api.get(`/transactions?${params}`);
-      const items = data.data.transactions || [];
+      const items = data.data?.data || data.data?.transactions || [];
       setLancamentos(items);
       setTotal(data.data.total || 0);
 
