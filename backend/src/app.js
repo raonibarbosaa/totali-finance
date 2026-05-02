@@ -47,7 +47,9 @@ app.get('/health', (req, res) => {
 
 // ── Rotas ─────────────────────────────────────────────
 app.use('/api/auth', loginLimiter, authRoutes);
-app.use('/api/tenants', tenantRoutes);
+app.use("/api/tenants", tenantRoutes);
+const titlesRoutes = require("./modules/titles/titles.routes");
+app.use("/api/titles", titlesRoutes);
 app.use('/api/users', userRoutes);
 
 // ── 404 ───────────────────────────────────────────────
