@@ -1,38 +1,54 @@
 import { X } from 'lucide-react';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function Modal({ open, onClose, title, size = 'md', children }) {
+  useEffect(() => {
+    if (open) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = '';
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
   if (!open) return null;
 
-  const sizes = {
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-lg',
-    xl: 'max-w-2xl',
-  };
+  const sizes = { sm: '480px', md: '520px', lg: '640px', xl: '768px' };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+        zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '16px', boxSizing: 'border-box', backgroundColor: 'rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(2px)',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${sizes[size]}
-                       animate-fade-in max-h-[90vh] flex flex-col`}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b
-                        border-slate-100 flex-shrink-0">
-          <h3 className="font-display font-semibold text-navy-800">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors
-                       p-1 hover:bg-slate-100 rounded-lg"
-          >
+        style={{
+          background: 'white', borderRadius: '16px',
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+          width: '100%', maxWidth: sizes[size] || sizes.md,
+          maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '16px 24px', borderBottom: '1px solid #e2e8f0', flexShrink: 0,
+        }}>
+          <h3 style={{ margin: 0, fontWeight: 600, color: '#152740', fontSize: '16px' }}>{title}</h3>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: '#94a3b8', padding: '4px', borderRadius: '6px',
+            display: 'flex', alignItems: 'center',
+          }}>
             <X size={17} />
           </button>
         </div>
-        {/* Body */}
-        <div className="px-6 py-5 overflow-y-auto">{children}</div>
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
