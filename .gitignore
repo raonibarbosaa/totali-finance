@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.npm
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Build
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# Prisma
+backend/prisma/migrations/
+
+# Docker volumes
+backups/
+letsencrypt/

@@ -1,0 +1,12 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate } = require('../../middleware/auth');
+const { tenantGuard } = require('../../middleware/tenantGuard');
+const { roleGuard } = require('../../middleware/roleGuard');
+const ctrl = require('./ofx.controller');
+router.use(authenticate, tenantGuard);
+router.get('/imports', roleGuard([1,2]), ctrl.listImports);
+router.get('/pending', roleGuard([1,2]), ctrl.listPending);
+router.post('/import', roleGuard([1,2]), ctrl.importFile);
+router.post('/launch', roleGuard([1,2]), ctrl.launchPending);
+module.exports = router;

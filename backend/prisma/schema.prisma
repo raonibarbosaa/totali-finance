@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id            String   @id @default(uuid())
+  razaoSocial   String   @map("razao_social") @db.VarChar(200)
+  nomeFantasia  String?  @map("nome_fantasia") @db.VarChar(200)
+  cnpj          String   @unique @db.VarChar(18)
+  codigoFilial  String?  @map("codigo_filial") @db.VarChar(20)
+  regime        String   @default("caixa") @db.VarChar(12)
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now()) @map("criado_em")
+  atualizadoEm  DateTime @updatedAt @map("atualizado_em")
+
+  userRoles         UserTenantRole[]
+  bankAccounts      BankAccount[]
+  categories        Category[]
+  ofxPatterns       OfxPattern[]
+  transactions      Transaction[]
+  titles            Title[]
+  ofxImports        OfxImport[]
+  stockAdjustments  StockAdjustment[]
+  periodClosings    PeriodClosing[]
+  exportLogs        ExportLog[]
+  notifications     Notification[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  nome         String   @db.VarChar(150)
+  email        String   @unique @db.VarChar(150)
+  senhaHash    String   @map("senha_hash") @db.VarChar(255)
+  perfil       String   @db.VarChar(25)
+  ativo        Boolean  @default(true)
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  tenantRoles        UserTenantRole[]
+  refreshTokens      RefreshToken[]
+  transactionsCriadas Transaction[] @relation("TransacaoCriadaPor")
+  titlesCriados       Title[]       @relation("TituloCriadoPor")
+  stocksCriados       StockAdjustment[]
+  periodsFechados     PeriodClosing[]  @relation("FechadoPor")
+  periodsReabertos    PeriodClosing[]  @relation("ReabertoPor")
+  exportacoes         ExportLog[]
+  ofxImports          OfxImport[]
+  vinculosFeitos      UserTenantRole[] @relation("VinculadoPor")
+
+  @@map("users")
+}
+
+model UserTenantRole {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  tenantId    String   @map("tenant_id")
+  role        Int
+  vinculadoPor String? @map("vinculado_por")
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vinculador User?  @relation("VinculadoPor", fields: [vinculadoPor], references: [id])
+
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
+  @@map("user_tenant_roles")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash") @db.VarChar(255)
+  expiraEm  DateTime @map("expira_em")
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model BankAccount {
+  id                String   @id @default(uuid())
+  tenantId          String   @map("tenant_id")
+  nome              String   @db.VarChar(100)
+  banco             String?  @db.VarChar(100)
+  agencia           String?  @db.VarChar(20)
+  conta             String?  @db.VarChar(30)
+  tipo              String   @db.VarChar(20)
+  saldoInicial      Decimal  @default(0) @map("saldo_inicial") @db.Decimal(15, 2)
+  dataSaldoInicial  DateTime? @map("data_saldo_inicial") @db.Date
+  ativo             Boolean  @default(true)
+  criadoEm          DateTime @default(now()) @map("criado_em")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  transactions Transaction[]
+  titles       Title[]
+  ofxImports   OfxImport[]
+
+  @@index([tenantId])
+  @@map("bank_accounts")
+}
+
+model Category {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  nome           String   @db.VarChar(150)
+  tipo           String   @db.VarChar(20)
+  natureza       String   @db.VarChar(10)
+  contaDebito    String?  @map("conta_debito") @db.VarChar(20)
+  contaCredito   String?  @map("conta_credito") @db.VarChar(20)
+  codHistorico   String?  @map("cod_historico") @db.VarChar(20)
+  centroCustoD   String?  @map("centro_custo_d") @db.VarChar(20)
+  centroCustoC   String?  @map("centro_custo_c") @db.VarChar(20)
+  flagMercadoria Boolean  @default(false) @map("flag_mercadoria")
+  ativo          Boolean  @default(true)
+  criadoEm       DateTime @default(now()) @map("criado_em")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  transactions Transaction[]
+  titles       Title[]
+  ofxPatterns  OfxPattern[]
+
+  @@index([tenantId])
+  @@map("categories")
+}
+
+model OfxPattern {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  textoHistorico  String   @map("texto_historico") @db.VarChar(255)
+  categoryId      String   @map("category_id")
+  complementoAuto String?  @map("complemento_auto") @db.VarChar(255)
+  ativo           Boolean  @default(true)
+  criadoEm        DateTime @default(now()) @map("criado_em")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  category Category @relation(fields: [categoryId], references: [id])
+
+  @@index([tenantId])
+  @@map("ofx_patterns")
+}
+
+model Transaction {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  bankAccountId   String?  @map("bank_account_id")
+  categoryId      String?  @map("category_id")
+  tipo            String   @db.VarChar(20)
+  dataLancamento  DateTime @map("data_lancamento") @db.Date
+  dataCompetencia DateTime? @map("data_competencia") @db.Date
+  valor           Decimal  @db.Decimal(15, 2)
+  descricao       String?  @db.VarChar(255)
+  complemento     String?  @db.VarChar(500)
+  contaDebito     String?  @map("conta_debito") @db.VarChar(20)
+  contaCredito    String?  @map("conta_credito") @db.VarChar(20)
+  codHistorico    String?  @map("cod_historico") @db.VarChar(20)
+  centroCustoD    String?  @map("centro_custo_d") @db.VarChar(20)
+  centroCustoC    String?  @map("centro_custo_c") @db.VarChar(20)
+  status          String   @default("realizado") @db.VarChar(20)
+  origem          String   @default("manual") @db.VarChar(20)
+  ofxImportId     String?  @map("ofx_import_id")
+  tituloId        String?  @map("titulo_id")
+  exportado       Boolean  @default(false)
+  criadoPor       String?  @map("criado_por")
+  criadoEm        DateTime @default(now()) @map("criado_em")
+  atualizadoEm    DateTime @updatedAt @map("atualizado_em")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+  category    Category?    @relation(fields: [categoryId], references: [id])
+  criador     User?        @relation("TransacaoCriadaPor", fields: [criadoPor], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, dataLancamento])
+  @@index([tenantId, bankAccountId])
+  @@index([tenantId, status])
+  @@index([tenantId, exportado])
+  @@map("transactions")
+}
+
+model Title {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  categoryId     String?   @map("category_id")
+  bankAccountId  String?   @map("bank_account_id")
+  tipo           String    @db.VarChar(10)
+  descricao      String    @db.VarChar(255)
+  valor          Decimal   @db.Decimal(15, 2)
+  dataEmissao    DateTime  @map("data_emissao") @db.Date
+  dataVencimento DateTime  @map("data_vencimento") @db.Date
+  dataPagamento  DateTime? @map("data_pagamento") @db.Date
+  status         String    @default("aberto") @db.VarChar(20)
+  transactionId  String?   @map("transaction_id")
+  criadoPor      String?   @map("criado_por")
+  criadoEm       DateTime  @default(now()) @map("criado_em")
+  atualizadoEm   DateTime  @updatedAt @map("atualizado_em")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  category    Category?    @relation(fields: [categoryId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+  criador     User?        @relation("TituloCriadoPor", fields: [criadoPor], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, dataVencimento])
+  @@map("titles")
+}
+
+model OfxImport {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  bankAccountId  String   @map("bank_account_id")
+  nomeArquivo    String?  @map("nome_arquivo") @db.VarChar(255)
+  dataInicio     DateTime? @map("data_inicio") @db.Date
+  dataFim        DateTime? @map("data_fim") @db.Date
+  totalRegistros Int?     @map("total_registros")
+  conciliados    Int?     @default(0)
+  pendentes      Int?     @default(0)
+  importadoPor   String?  @map("importado_por")
+  importadoEm    DateTime @default(now()) @map("importado_em")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
+  importador  User?       @relation(fields: [importadoPor], references: [id])
+
+  @@map("ofx_imports")
+}
+
+model StockAdjustment {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  competencia  DateTime @db.Date
+  valorEstoque Decimal  @map("valor_estoque") @db.Decimal(15, 2)
+  observacao   String?  @db.VarChar(500)
+  criadoPor    String?  @map("criado_por")
+  criadoEm     DateTime @default(now()) @map("criado_em")
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id])
+  criador User?  @relation(fields: [criadoPor], references: [id])
+
+  @@map("stock_adjustments")
+}
+
+model PeriodClosing {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  competencia DateTime  @db.Date
+  status      String    @default("aberto") @db.VarChar(10)
+  fechadoPor  String?   @map("fechado_por")
+  fechadoEm   DateTime? @map("fechado_em")
+  reabertoP   String?   @map("reaberto_por")
+  reabertoEm  DateTime? @map("reaberto_em")
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  fechador User?  @relation("FechadoPor", fields: [fechadoPor], references: [id])
+  reabrid  User?  @relation("ReabertoPor", fields: [reabertoP], references: [id])
+
+  @@unique([tenantId, competencia])
+  @@index([tenantId, competencia])
+  @@map("period_closings")
+}
+
+model ExportLog {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  periodoInicio  DateTime @map("periodo_inicio") @db.Date
+  periodoFim     DateTime @map("periodo_fim") @db.Date
+  totalRegistros Int?     @map("total_registros")
+  exportadoPor   String?  @map("exportado_por")
+  exportadoEm    DateTime @default(now()) @map("exportado_em")
+  nomeArquivo    String?  @map("nome_arquivo") @db.VarChar(255)
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id])
+  exportador User?  @relation(fields: [exportadoPor], references: [id])
+
+  @@map("export_logs")
+}
+
+model Notification {
+  id             String   @id @default(uuid())
+  tenantId       String?  @map("tenant_id")
+  destinatarioId String?  @map("destinatario_id")
+  tipo           String   @db.VarChar(50)
+  titulo         String?  @db.VarChar(255)
+  mensagem       String?
+  lida           Boolean  @default(false)
+  criadoEm       DateTime @default(now()) @map("criado_em")
+
+  tenant       Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@map("notifications")
+}

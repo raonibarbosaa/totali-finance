@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
+  }
+}
+
+@layer components {
+  /* Botões */
+  .btn-primary {
+    @apply bg-navy-800 text-white px-4 py-2 rounded-lg text-sm font-medium
+           hover:bg-navy-700 active:bg-navy-900 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-navy-800 border border-navy-200 px-4 py-2 rounded-lg
+           text-sm font-medium hover:bg-navy-50 active:bg-navy-100
+           transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-gold {
+    @apply bg-gold-500 text-white px-4 py-2 rounded-lg text-sm font-medium
+           hover:bg-gold-600 active:bg-gold-700 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium
+           hover:bg-red-700 transition-colors duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply w-full px-3 py-2 border border-slate-200 rounded-lg text-sm
+           focus:outline-none focus:ring-2 focus:ring-navy-300 focus:border-navy-400
+           bg-white placeholder-slate-400 transition-all duration-150;
+  }
+
+  .input-label {
+    @apply block text-xs font-medium text-slate-600 mb-1;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-xl border border-slate-100 shadow-sm;
+  }
+
+  .card-header {
+    @apply px-6 py-4 border-b border-slate-100 flex items-center justify-between;
+  }
+
+  .card-body {
+    @apply px-6 py-4;
+  }
+
+  /* Badge de role */
+  .badge-role-1 {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+           bg-navy-100 text-navy-700;
+  }
+  .badge-role-2 {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+           bg-blue-100 text-blue-700;
+  }
+  .badge-role-3 {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+           bg-slate-100 text-slate-600;
+  }
+
+  /* Sidebar link */
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+           text-navy-200 hover:text-white hover:bg-navy-700/50
+           transition-all duration-150 cursor-pointer;
+  }
+
+  .sidebar-link.active {
+    @apply text-white bg-navy-700/70;
+  }
+}
+
+/* Scrollbar customizada */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-slate-100;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400;
+}
+
+/* Animações */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out forwards;
+}

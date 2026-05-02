@@ -1,0 +1,17 @@
+const express = require('express');
+const router = express.Router();
+const { authenticate } = require('../../middleware/auth');
+const { tenantGuard } = require('../../middleware/tenantGuard');
+const { roleGuard } = require('../../middleware/roleGuard');
+const { periodGuard } = require('../../middleware/periodGuard');
+const ctrl = require('./payables.controller');
+router.use(authenticate, tenantGuard);
+router.get('/', roleGuard([1,2,3]), ctrl.list);
+router.get('/summary', roleGuard([1,2,3]), ctrl.summary);
+router.get('/:id', roleGuard([1,2,3]), ctrl.findOne);
+router.post('/', roleGuard([1,2,3]), periodGuard, ctrl.create);
+router.put('/:id', roleGuard([1,2,3]), periodGuard, ctrl.update);
+router.delete('/:id', roleGuard([1,2,3]), periodGuard, ctrl.remove);
+router.post('/:id/baixa', roleGuard([1,2,3]), periodGuard, ctrl.baixar);
+router.post('/:id/cancelar', roleGuard([1]), periodGuard, ctrl.cancelar);
+module.exports = router;

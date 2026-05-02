@@ -1,0 +1,101 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: totali_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: totalifinance
+      POSTGRES_USER: totali
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-totali_senha_segura_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - totali_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U totali -d totalifinance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend Node.js ────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: totali_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://totali:${POSTGRES_PASSWORD:-totali_senha_segura_2026}@postgres:5432/totalifinance
+      JWT_SECRET: ${JWT_SECRET:-troque_esta_chave_em_producao}
+      JWT_EXPIRES_IN: 15m
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-troque_esta_chave_tambem}
+      REFRESH_TOKEN_EXPIRES_IN: 7d
+      PORT: 3000
+      NODE_ENV: production
+      FRONTEND_URL: ${FRONTEND_URL:-https://app.totalicontabilidade.com.br}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-TotaliFinance <noreply@totalicontabilidade.com.br>}
+      EMAIL_ADMIN: ${EMAIL_ADMIN:-financeiro@totalicontabilidade.com.br}
+    networks:
+      - totali_network
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  # ── Frontend React (build estático via Nginx) ──────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: totali_frontend
+    restart: unless-stopped
+    networks:
+      - totali_network
+
+  # ── Nginx (proxy reverso + SSL) ────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: totali_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    networks:
+      - totali_network
+
+  # ── Certbot (SSL Let's Encrypt) ─────────────────────────
+  certbot:
+    image: certbot/certbot
+    container_name: totali_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    # Rode manualmente: docker compose run certbot certonly ...
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'"
+
+volumes:
+  postgres_data:
+  certbot_www:
+  certbot_conf:
+
+networks:
+  totali_network:
+    driver: bridge
