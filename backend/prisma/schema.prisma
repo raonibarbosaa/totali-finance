@@ -24,11 +24,15 @@ model Tenant {
   ofxPatterns       OfxPattern[]
   transactions      Transaction[]
   titles            Title[]
+  recurringTitles   RecurringTitle[]
   ofxImports        OfxImport[]
   stockAdjustments  StockAdjustment[]
   periodClosings    PeriodClosing[]
   exportLogs        ExportLog[]
   notifications     Notification[]
+
+  suppliers         Supplier[]
+  customers         Customer[]
 
   @@map("tenants")
 }
@@ -47,6 +51,7 @@ model User {
   refreshTokens      RefreshToken[]
   transactionsCriadas Transaction[] @relation("TransacaoCriadaPor")
   titlesCriados       Title[]       @relation("TituloCriadoPor")
+  recurringCriados    RecurringTitle[] @relation("RecurringCriadoPor")
   stocksCriados       StockAdjustment[]
   periodsFechados     PeriodClosing[]  @relation("FechadoPor")
   periodsReabertos    PeriodClosing[]  @relation("ReabertoPor")
@@ -124,10 +129,11 @@ model Category {
   ativo          Boolean  @default(true)
   criadoEm       DateTime @default(now()) @map("criado_em")
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id])
-  transactions Transaction[]
-  titles       Title[]
-  ofxPatterns  OfxPattern[]
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  transactions    Transaction[]
+  titles          Title[]
+  recurringTitles RecurringTitle[]
+  ofxPatterns     OfxPattern[]
 
   @@index([tenantId])
   @@map("categories")
@@ -188,30 +194,98 @@ model Transaction {
 }
 
 model Title {
-  id             String    @id @default(uuid())
-  tenantId       String    @map("tenant_id")
-  categoryId     String?   @map("category_id")
-  bankAccountId  String?   @map("bank_account_id")
-  tipo           String    @db.VarChar(10)
-  descricao      String    @db.VarChar(255)
-  valor          Decimal   @db.Decimal(15, 2)
-  dataEmissao    DateTime  @map("data_emissao") @db.Date
-  dataVencimento DateTime  @map("data_vencimento") @db.Date
-  dataPagamento  DateTime? @map("data_pagamento") @db.Date
-  status         String    @default("aberto") @db.VarChar(20)
-  transactionId  String?   @map("transaction_id")
-  criadoPor      String?   @map("criado_por")
-  criadoEm       DateTime  @default(now()) @map("criado_em")
-  atualizadoEm   DateTime  @updatedAt @map("atualizado_em")
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  categoryId       String?   @map("category_id")
+  bankAccountId    String?   @map("bank_account_id")
+  recurringTitleId String?   @map("recurring_title_id")
+  tipo             String    @db.VarChar(10)
+  descricao        String    @db.VarChar(255)
+  valor            Decimal   @db.Decimal(15, 2)
+  dataEmissao      DateTime  @map("data_emissao") @db.Date
+  dataVencimento   DateTime  @map("data_vencimento") @db.Date
+  dataPagamento    DateTime? @map("data_pagamento") @db.Date
+  status           String    @default("aberto") @db.VarChar(20)
+  numeroDocumento  String?   @map("numero_documento") @db.VarChar(100)
+  nomeContato      String?   @map("nome_contato") @db.VarChar(200)
+  observacao       String?   @db.Text
+  transactionId    String?   @map("transaction_id")
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id])
-  category    Category?    @relation(fields: [categoryId], references: [id])
-  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
-  criador     User?        @relation("TituloCriadoPor", fields: [criadoPor], references: [id])
+  // Cadastros (Etapa 4.2)
+  supplierId          String?  @map("supplier_id")
+  customerId          String?  @map("customer_id")
 
+  // Parcelamento (Etapa 4.1)
+  grupoParcelamentoId String?  @map("grupo_parcelamento_id")
+  parcelaNumero       Int?     @map("parcela_numero")
+  parcelaTotal        Int?     @map("parcela_total")
+  valorTotalGrupo     Decimal? @db.Decimal(15, 2) @map("valor_total_grupo")
+
+  criadoPor        String?   @map("criado_por")
+  criadoEm         DateTime  @default(now()) @map("criado_em")
+  atualizadoEm     DateTime  @updatedAt @map("atualizado_em")
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  category       Category?       @relation(fields: [categoryId], references: [id])
+  bankAccount    BankAccount?    @relation(fields: [bankAccountId], references: [id])
+  recurringTitle RecurringTitle? @relation(fields: [recurringTitleId], references: [id])
+  criador        User?           @relation("TituloCriadoPor", fields: [criadoPor], references: [id])
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id])
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+
+  @@unique([recurringTitleId, dataVencimento])
   @@index([tenantId, status])
   @@index([tenantId, dataVencimento])
+  @@index([tenantId, grupoParcelamentoId])
   @@map("titles")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Templates de títulos recorrentes (Contas a Pagar/Receber Fixas)
+//
+// Cada registro descreve um template de título que se repete numa cadência
+// definida (semanal/quinzenal/mensal/anual). Os títulos efetivos são gerados
+// sob demanda no titles.service.list() — ver gerarOcorrenciasPendentes().
+//
+// `dataFimGeracao` é preenchida quando o usuário cancela: a partir dessa data,
+// nenhuma nova ocorrência é gerada, mas títulos já gerados ficam intactos.
+//
+// Edição em uma ocorrência específica afeta APENAS aquela ocorrência (já que
+// é uma linha em `titles`); o template continua gerando as próximas com os
+// valores originais.
+//
+// `diaVencimento` interpretação por frequencia:
+//   mensal     → dia do mês (1-31)
+//   anual      → dia do mês (1-31), gerado todo ano no mesmo mês de dataInicio
+//   semanal    → dia da semana (0=domingo a 6=sábado)
+//   quinzenal  → dia da semana (0=domingo a 6=sábado), 1x a cada 14 dias
+// ─────────────────────────────────────────────────────────────────────────────
+model RecurringTitle {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  categoryId      String?   @map("category_id")
+  tipo            String    @db.VarChar(10)
+  descricao       String    @db.VarChar(255)
+  valor           Decimal   @db.Decimal(15, 2)
+  numeroDocumento String?   @map("numero_documento") @db.VarChar(100)
+  nomeContato     String?   @map("nome_contato") @db.VarChar(200)
+  observacao      String?   @db.Text
+  frequencia      String    @db.VarChar(15)
+  diaVencimento   Int       @map("dia_vencimento")
+  dataInicio      DateTime  @map("data_inicio") @db.Date
+  dataFimGeracao  DateTime? @map("data_fim_geracao") @db.Date
+  ativo           Boolean   @default(true)
+  criadoPor       String?   @map("criado_por")
+  criadoEm        DateTime  @default(now()) @map("criado_em")
+  atualizadoEm    DateTime  @updatedAt @map("atualizado_em")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
+  criador  User?     @relation("RecurringCriadoPor", fields: [criadoPor], references: [id])
+  titles   Title[]
+
+  @@index([tenantId, ativo])
+  @@map("recurring_titles")
 }
 
 model OfxImport {
@@ -297,4 +371,55 @@ model Notification {
   tenant       Tenant? @relation(fields: [tenantId], references: [id])
 
   @@map("notifications")
+}
+
+enum TipoDocumento {
+  CPF
+  CNPJ
+
+  @@map("tipo_documento")
+}
+
+model Supplier {
+  id            String         @id @default(uuid())
+  tenantId      String         @map("tenant_id")
+  nome          String         @db.VarChar(200)
+  documento     String?        @db.VarChar(20)
+  tipoDocumento TipoDocumento? @map("tipo_documento")
+  email         String?        @db.VarChar(150)
+  telefone      String?        @db.VarChar(30)
+  endereco      String?        @db.Text
+  observacao    String?        @db.Text
+  ativo         Boolean        @default(true)
+  criadoEm      DateTime       @default(now()) @map("criado_em")
+  atualizadoEm  DateTime       @updatedAt      @map("atualizado_em")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  titles Title[]
+
+  @@index([tenantId, ativo])
+  @@index([tenantId, nome])
+  @@map("suppliers")
+}
+
+model Customer {
+  id            String         @id @default(uuid())
+  tenantId      String         @map("tenant_id")
+  nome          String         @db.VarChar(200)
+  documento     String?        @db.VarChar(20)
+  tipoDocumento TipoDocumento? @map("tipo_documento")
+  email         String?        @db.VarChar(150)
+  telefone      String?        @db.VarChar(30)
+  endereco      String?        @db.Text
+  observacao    String?        @db.Text
+  ativo         Boolean        @default(true)
+  criadoEm      DateTime       @default(now()) @map("criado_em")
+  atualizadoEm  DateTime       @updatedAt      @map("atualizado_em")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  titles Title[]
+
+  @@index([tenantId, ativo])
+  @@index([tenantId, nome])
+  @@map("customers")
 }

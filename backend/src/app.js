@@ -50,11 +50,15 @@ app.use('/api/auth', loginLimiter, authRoutes);
 app.use("/api/tenants", tenantRoutes);
 const titlesRoutes = require("./modules/titles/titles.routes");
 app.use("/api/titles", titlesRoutes);
+const suppliersRoutes = require("./modules/suppliers/suppliers.routes");
+app.use("/api/suppliers", suppliersRoutes);
+const customersRoutes = require("./modules/customers/customers.routes");
+app.use("/api/customers", customersRoutes);
+const recurringTitlesRoutes = require("./modules/recurring-titles/recurring-titles.routes");
+app.use("/api/recurring-titles", recurringTitlesRoutes);
 app.use('/api/users', userRoutes);
 
-// ── 404 ───────────────────────────────────────────────
-
-
+// ── Rotas Etapas 2 e 3 ────────────────────────────────
 const bankAccountsRoutes = require('./modules/bank-accounts/bank-accounts.routes');
 const categoriesRoutes = require('./modules/categories/categories.routes');
 const ofxPatternsRoutes = require('./modules/ofx-patterns/ofx-patterns.routes');
@@ -67,6 +71,26 @@ app.use('/api/ofx-patterns', ofxPatternsRoutes);
 app.use('/api/company-settings', companySettingsRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+
+// ── Rotas Etapas 4 a 10 ───────────────────────────────
+const payablesRoutes = require('./modules/payables/payables.routes');
+const ofxRoutes = require('./modules/ofx/ofx.routes');
+const reportsRoutes = require('./modules/reports/reports.routes');
+const stockRoutes = require('./modules/stock/stock.routes');
+const exportRoutes = require('./modules/export/export.routes');
+const periodsRoutes = require('./modules/periods/periods.routes');
+const notificationsRoutes = require('./modules/notifications/notifications.routes');
+const adminRoutes = require('./modules/admin/admin.routes');
+app.use('/api/payables', payablesRoutes);
+app.use('/api/ofx', ofxRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/stock', stockRoutes);
+app.use('/api/export', exportRoutes);
+app.use('/api/periods', periodsRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/admin', adminRoutes);
+
+// ── 404 ───────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'Rota não encontrada.' });
 });
