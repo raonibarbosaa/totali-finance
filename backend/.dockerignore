@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.env
+.env.bak
+.env.local
+.git
+.gitignore
+.DS_Store
+*.bak
+*.bak2
+*.bak3
+*.backup
+*.md
+prisma/migrations/.lock

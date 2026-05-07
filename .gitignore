@@ -1,26 +1,49 @@
-# Dependencies
+# ── Dependencies ──────────────────────────────
 node_modules/
-.npm
 
-# Environment
-.env
-.env.local
-.env.production
-
-# Build
+# ── Build outputs ─────────────────────────────
 dist/
 build/
+.vite/
 
-# Logs
-logs/
-*.log
+# ── Environment ───────────────────────────────
+.env
+.env.local
+.env.*.local
 
-# OS
+# ── Editor backups (NUNCA mais commitar isso!) ───
+*.bak
+*.bak[0-9]
+*.preedit
+*.backup
+*.alpine-backup
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
 
-# Prisma
-backend/prisma/migrations/
+# ── Logs ──────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Docker volumes
-backups/
-letsencrypt/
+# ── IDE ───────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+*.sublime-*
+
+# ── Docker volumes (dados locais) ─────────────
+postgres_data/
+postgres-data/
+
+# ── Outputs de terminal/scripts auxiliares ────
+Resultado*.txt
+*.terminal.txt
+docs/legacy/

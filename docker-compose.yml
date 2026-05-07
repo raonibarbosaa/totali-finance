@@ -33,9 +33,9 @@ services:
     environment:
       DATABASE_URL: postgresql://totali:${POSTGRES_PASSWORD:-totali_senha_segura_2026}@postgres:5432/totalifinance
       JWT_SECRET: ${JWT_SECRET:-troque_esta_chave_em_producao}
-      JWT_EXPIRES_IN: 15m
+      JWT_EXPIRES_IN: 24h
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-troque_esta_chave_tambem}
-      REFRESH_TOKEN_EXPIRES_IN: 7d
+      REFRESH_TOKEN_EXPIRES_IN: 30d
       PORT: 3000
       NODE_ENV: production
       FRONTEND_URL: ${FRONTEND_URL:-https://app.totalicontabilidade.com.br}
