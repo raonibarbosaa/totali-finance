@@ -11,6 +11,8 @@
 // `supplierId`, `customerId`, `parcelamento`.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import PeriodPresets from '../components/ui/PeriodPresets';
+import matchSearch from '../utils/searchMatcher';
 import { useLocation } from 'react-router-dom';
 import api from '../services/api';
 import SelectComCadastro from '../components/ui/SelectComCadastro';
@@ -49,6 +51,16 @@ export default function ContasPagarReceber() {
 
   const [modalTitulo, setModalTitulo] = useState({ open: false, editando: null });
   const [modalBaixa,  setModalBaixa]  = useState({ open: false, titulo: null });
+
+  // Filtro client-side adicional (OR entre palavras + valor exato).
+  // Aplicado depois do filtro server-side de status/datas.
+  const titulosFiltrados = useMemo(
+    () => titulos.filter(t => matchSearch(t, filtros.search,
+      ['descricao', 'complemento', 'numeroDocumento', 'supplier.nome', 'customer.nome', 'category.nome'],
+      ['valor', 'valorPago']
+    )),
+    [titulos, filtros.search]
+  );
 
   // Reagir a mudança de URL (navegar entre /contas-pagar e /contas-receber)
   useEffect(() => {
@@ -181,6 +193,15 @@ export default function ContasPagarReceber() {
           <option value="pago">Pagos</option>
           <option value="cancelado">Cancelados</option>
         </select>
+        <div className="w-full">
+          <PeriodPresets
+            onChange={(ini, fim) => {
+              setFiltro('dateFrom', ini);
+              setFiltro('dateTo', fim);
+            }}
+            className="mb-2"
+          />
+        </div>
         <input
           type="date"
           value={filtros.dateFrom}
@@ -219,10 +240,10 @@ export default function ContasPagarReceber() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-400">Carregando...</td></tr>
-            ) : titulos.length === 0 ? (
+            ) : titulosFiltrados.length === 0 ? (
               <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-400">Nenhum título encontrado</td></tr>
             ) : (
-              titulos.map((t) => {
+              titulosFiltrados.map((t) => {
                 const vencido = isVencido(t);
                 const contato = isPagar
                   ? (t.supplier?.nome || t.nomeContato)

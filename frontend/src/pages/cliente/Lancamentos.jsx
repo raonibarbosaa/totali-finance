@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import PeriodPresets from '../../components/ui/PeriodPresets';
+import matchSearch from '../../utils/searchMatcher';
 import {
   Plus, Search, Filter, Edit2, Trash2,
   TrendingUp, TrendingDown, ArrowLeftRight,
@@ -56,10 +58,20 @@ export default function Lancamentos() {
     search:        '',
   });
 
+  const [searchTerm, setSearchTerm]   = useState('');
   const [showFiltros, setShowFiltros] = useState(false);
   const [modalLanc, setModalLanc]     = useState(false);
   const [editando, setEditando]       = useState(null);
   const [confirmDel, setConfirmDel]   = useState(null);
+
+  // Busca client-side: OR entre palavras + valor exato
+  const lancamentosFiltrados = useMemo(
+    () => lancamentos.filter(l => matchSearch(l, searchTerm,
+      ['descricao', 'complemento', 'category.nome', 'bankAccount.nome'],
+      ['valor']
+    )),
+    [lancamentos, searchTerm]
+  );
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -159,6 +171,19 @@ export default function Lancamentos() {
       {/* Painel de filtros */}
       {showFiltros && (
         <div className="card p-4 animate-fade-in">
+          <PeriodPresets
+            onChange={(ini, fim) => setFiltros(f => ({ ...f, dataInicio: ini, dataFim: fim }))}
+            className="mb-3"
+          />
+          <div className="mb-3">
+            <input
+              type="text"
+              placeholder="Buscar por descricao, complemento, categoria, valor..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="input-field text-xs w-full"
+            />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <div>
               <label className="input-label">Data início</label>
@@ -266,7 +291,7 @@ export default function Lancamentos() {
                   </td>
                 </tr>
               ) : (
-                lancamentos.map(t => {
+                lancamentosFiltrados.map(t => {
                   const cfg = TIPO_CONFIG[t.tipo] || TIPO_CONFIG.despesa;
                   const Icon = cfg.icon;
                   return (
