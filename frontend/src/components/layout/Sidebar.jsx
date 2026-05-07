@@ -3,7 +3,7 @@ import {
   LayoutDashboard, ArrowLeftRight, FileUp, Landmark,
   Tags, GitBranch, Package, BarChart2, FileText,
   Lock, Users, Building2, ChevronDown, LogOut,
-  CreditCard, Wallet, Settings, BookOpen
+  CreditCard, Wallet, Settings, BookOpen, Truck, UserCircle, Repeat
 } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import useRole from '../../hooks/useRole';
@@ -94,6 +94,13 @@ export default function Sidebar() {
           <SidebarLink to="/app/lancamentos" icon={ArrowLeftRight}>Lançamentos</SidebarLink>
           <SidebarLink to="/app/contas-pagar" icon={CreditCard}>Contas a Pagar</SidebarLink>
           <SidebarLink to="/app/contas-receber" icon={Wallet}>Contas a Receber</SidebarLink>
+          </SidebarSection>
+
+          <SidebarLink to="/app/recorrencias-fixas" icon={Repeat}>Recorrências Fixas</SidebarLink>
+
+        <SidebarSection title="Cadastros">
+          <SidebarLink to="/app/fornecedores" icon={Truck}>Fornecedores</SidebarLink>
+          <SidebarLink to="/app/clientes" icon={UserCircle}>Clientes</SidebarLink>
         </SidebarSection>
 
         {/* Nível 2+ — Bancário */}

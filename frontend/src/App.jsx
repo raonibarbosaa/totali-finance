@@ -5,7 +5,9 @@ import Login from './pages/Login';
 import SelecionarEmpresa from './pages/SelecionarEmpresa';
 import DashboardCliente from './pages/cliente/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';
-import Clientes from './pages/admin/Clientes';
+import AdminClientes from './pages/admin/Clientes';
+import Fornecedores from './pages/cliente/Fornecedores';
+import Clientes from './pages/cliente/Clientes';
 import AdminUsuarios from './pages/admin/Usuarios';
 import ContasBancarias from './pages/cliente/ContasBancarias';
 import Categorias from './pages/cliente/Categorias';
@@ -14,6 +16,7 @@ import ConfiguracaoEmpresa from './pages/cliente/ConfiguracaoEmpresa';
 import Lancamentos from './pages/cliente/Lancamentos';
 import Extrato from './pages/cliente/Extrato';
 import ContasPagarReceber from './pages/ContasPagarReceber';
+import RecorrenciasFixas from './pages/RecorrenciasFixas';
 import ImportacaoOFX from './pages/ImportacaoOFX';
 import DRE from './pages/DRE';
 import DFC from './pages/DFC';
@@ -36,6 +39,7 @@ export default function App() {
           <Route path="lancamentos" element={<Lancamentos />} />
           <Route path="contas-pagar" element={<ContasPagarReceber />} />
           <Route path="contas-receber" element={<ContasPagarReceber />} />
+          <Route path="recorrencias-fixas" element={<RecorrenciasFixas />} />
           <Route path="extrato" element={<Extrato />} />
           <Route path="importacao-ofx" element={<ImportacaoOFX />} />
           <Route path="categorias" element={<Categorias />} />
@@ -48,12 +52,14 @@ export default function App() {
           <Route path="relatorios/comparativo" element={<ComparativoMensal />} />
           <Route path="exportacao-dominio" element={<ExportacaoDominio />} />
           <Route path="fechamento" element={<FechamentoCompetencia />} />
+          <Route path="fornecedores" element={<Fornecedores />} />
+          <Route path="clientes" element={<Clientes />} />
           <Route path="usuarios" element={<UsuariosEmpresaPage />} />
         </Route>
         <Route path="/admin" element={<PrivateRoute requireTenant={false}><Layout /></PrivateRoute>}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<PainelAdmin />} />
-          <Route path="clientes" element={<Clientes />} />
+          <Route path="clientes" element={<AdminClientes />} />
           <Route path="usuarios" element={<AdminRoute><AdminUsuarios /></AdminRoute>} />
           <Route path="fechamentos" element={<AdminFechamentosPage />} />
         </Route>
