@@ -48,7 +48,7 @@ const useAuthStore = create(
         user: state.user,
         tenant: state.tenant,
         role: state.role,
-        // accessToken NÃO é persistido (segurança)
+        accessToken: state.accessToken,
         // empresas NÃO é persistida
       }),
     }

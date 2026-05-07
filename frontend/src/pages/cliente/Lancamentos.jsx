@@ -80,8 +80,8 @@ export default function Lancamentos() {
       setTotal(data.data.total || 0);
 
       // Totais do período filtrado
-      const rec  = items.filter(t => t.tipo === 'receita' && t.status !== 'previsto').reduce((a, t) => a + Number(t.valor), 0);
-      const desp = items.filter(t => t.tipo === 'despesa' && t.status !== 'previsto').reduce((a, t) => a + Number(t.valor), 0);
+      const rec  = items.filter(t => t.tipo === 'receita' && t.status !== 'previsto' && t.origem !== 'transferencia').reduce((a, t) => a + Number(t.valor), 0);
+      const desp = items.filter(t => t.tipo === 'despesa' && t.status !== 'previsto' && t.origem !== 'transferencia').reduce((a, t) => a + Number(t.valor), 0);
       setTotais({ receitas: rec, despesas: desp });
     } catch (_) {}
     setLoading(false);

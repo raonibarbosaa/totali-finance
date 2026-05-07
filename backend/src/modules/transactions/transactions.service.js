@@ -15,6 +15,23 @@ async function create(tenantId, userId, data) {
   if (!descricao) throw { status:400, message:"Descrição obrigatória" };
   if (!valor||valor<=0) throw { status:400, message:"Valor inválido" };
   if (!dataLancamento) throw { status:400, message:"Data obrigatória" };
+
+  // TRANSFERENCIA: cria 2 transacoes atomicamente
+  if (tipo === "transferencia") {
+    const { bankAccountIdOrigem, bankAccountIdDestino } = data;
+    if (!bankAccountIdOrigem) throw { status:400, message:"Conta de origem obrigatória" };
+    if (!bankAccountIdDestino) throw { status:400, message:"Conta de destino obrigatória" };
+    if (bankAccountIdOrigem === bankAccountIdDestino) throw { status:400, message:"Origem e destino devem ser diferentes" };
+    const v = parseFloat(valor);
+    const dt = new Date(dataLancamento);
+    const dc = dataCompetencia ? new Date(dataCompetencia) : dt;
+    const baseData = { tenantId, valor: v, dataLancamento: dt, dataCompetencia: dc, complemento: complemento || null, status: status || "realizado", origem: "transferencia", criadoPor: userId };
+    return prisma.$transaction([
+      prisma.transaction.create({ data: { ...baseData, tipo: "despesa", descricao: "Transferencia (saida) " + descricao, bankAccountId: bankAccountIdOrigem }, include: { category: true, bankAccount: true } }),
+      prisma.transaction.create({ data: { ...baseData, tipo: "receita", descricao: "Transferencia (entrada) " + descricao, bankAccountId: bankAccountIdDestino }, include: { category: true, bankAccount: true } }),
+    ]);
+  }
+
   let df = {};
   if (categoryId) {
     const cat = await prisma.category.findFirst({ where:{ id:categoryId, tenantId } });
@@ -26,7 +43,16 @@ async function update(id, tenantId, data) {
   const r = await prisma.transaction.findFirst({ where:{ id, tenantId } });
   if (!r) throw { status:404, message:"Lançamento não encontrado" };
   if (r.exportado) throw { status:400, message:"Lançamento exportado não pode ser editado" };
-  return prisma.transaction.update({ where:{id}, data, include:{category:true,bankAccount:true} });
+  const { bankAccountIdOrigem, bankAccountIdDestino, ...rest } = data;
+  const sanitized = {
+    ...rest,
+    ...(rest.valor !== undefined && { valor: parseFloat(rest.valor) }),
+    ...(rest.dataLancamento !== undefined && { dataLancamento: new Date(rest.dataLancamento) }),
+    ...(rest.dataCompetencia !== undefined && { dataCompetencia: rest.dataCompetencia ? new Date(rest.dataCompetencia) : null }),
+    ...(rest.categoryId !== undefined && { categoryId: rest.categoryId || null }),
+    ...(rest.bankAccountId !== undefined && { bankAccountId: rest.bankAccountId || null }),
+  };
+  return prisma.transaction.update({ where:{id}, data: sanitized, include:{category:true,bankAccount:true} });
 }
 async function remove(id, tenantId) {
   const r = await prisma.transaction.findFirst({ where:{ id, tenantId } });

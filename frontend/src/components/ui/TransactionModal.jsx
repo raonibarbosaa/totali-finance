@@ -15,6 +15,8 @@ const EMPTY = {
   valor: '',
   categoryId: '',
   bankAccountId: '',
+  bankAccountIdOrigem: '',
+  bankAccountIdDestino: '',
   descricao: '',
   complemento: '',
   dataCompetencia: '',
@@ -36,30 +38,35 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
   useEffect(() => {
     if (editando) {
       setForm({
-        tipo:            editando.tipo,
-        dataLancamento:  editando.dataLancamento?.substring(0, 10) || '',
-        valor:           editando.valor,
-        categoryId:      editando.categoryId || '',
-        bankAccountId:   editando.bankAccountId || '',
-        descricao:       editando.descricao || '',
-        complemento:     editando.complemento || '',
-        dataCompetencia: editando.dataCompetencia?.substring(0, 10) || '',
-        contaDebito:     editando.contaDebito || '',
-        contaCredito:    editando.contaCredito || '',
-        codHistorico:    editando.codHistorico || '',
-        centroCustoD:    editando.centroCustoD || '',
-        centroCustoC:    editando.centroCustoC || '',
+        tipo:                  editando.tipo,
+        dataLancamento:        editando.dataLancamento?.substring(0, 10) || '',
+        valor:                 editando.valor,
+        categoryId:            editando.categoryId || '',
+        bankAccountId:         editando.bankAccountId || '',
+        bankAccountIdOrigem:   '',
+        bankAccountIdDestino:  '',
+        descricao:             editando.descricao || '',
+        complemento:           editando.complemento || '',
+        dataCompetencia:       editando.dataCompetencia?.substring(0, 10) || '',
+        contaDebito:           editando.contaDebito || '',
+        contaCredito:          editando.contaCredito || '',
+        codHistorico:          editando.codHistorico || '',
+        centroCustoD:          editando.centroCustoD || '',
+        centroCustoC:          editando.centroCustoC || '',
       });
     } else {
       setForm(EMPTY);
     }
     setErro('');
-    setShowDominio(false);
   }, [editando, open]);
 
   // Quando muda categoria, herda campos Domínio (se vazios)
   function handleCategoryChange(categoryId) {
-    const todasCats = [...grupos.receita, ...grupos.despesa, ...grupos.transferencia];
+    const todasCats = [
+      ...(grupos.receita || []),
+      ...(grupos.despesa || []),
+      ...(grupos.transferencia || []),
+    ];
     const cat = todasCats.find(c => c.id === categoryId);
     setForm(prev => ({
       ...prev,
@@ -82,6 +89,24 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
       setErro('Informe um valor válido maior que zero.');
       return;
     }
+    if (form.tipo === 'transferencia') {
+      if (!form.bankAccountIdOrigem) {
+        setErro('Selecione a conta de origem.');
+        return;
+      }
+      if (!form.bankAccountIdDestino) {
+        setErro('Selecione a conta de destino.');
+        return;
+      }
+      if (form.bankAccountIdOrigem === form.bankAccountIdDestino) {
+        setErro('Conta de origem e destino devem ser diferentes.');
+        return;
+      }
+      if (!form.descricao) {
+        setErro('Descrição é obrigatória.');
+        return;
+      }
+    }
 
     setSaving(true);
     try {
@@ -101,7 +126,8 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
     setSaving(false);
   }
 
-  const catsFiltradas = grupos[form.tipo] || [];
+  const catsFiltradas    = grupos[form.tipo] || [];
+  const isTransferencia  = form.tipo === 'transferencia';
 
   return (
     <Modal
@@ -120,7 +146,14 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
               <button
                 key={t.value}
                 type="button"
-                onClick={() => setForm(prev => ({ ...prev, tipo: t.value, categoryId: '' }))}
+                onClick={() => setForm(prev => ({
+                  ...prev,
+                  tipo: t.value,
+                  categoryId: '',
+                  bankAccountId: '',
+                  bankAccountIdOrigem: '',
+                  bankAccountIdDestino: '',
+                }))}
                 className={`py-2 rounded-xl border-2 text-sm font-semibold transition-all ${
                   form.tipo === t.value
                     ? t.cor + ' border-current'
@@ -153,33 +186,68 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
           </div>
         </div>
 
-        {/* Categoria */}
-        <div>
-          <label className="input-label">Categoria</label>
-          <select className="input-field" value={form.categoryId}
-            onChange={e => handleCategoryChange(e.target.value)}>
-            <option value="">Sem categoria</option>
-            {catsFiltradas.map(c => (
-              <option key={c.id} value={c.id}>{c.nome}</option>
-            ))}
-          </select>
-        </div>
+        {/* Categoria — só Receita/Despesa */}
+        {!isTransferencia && (
+          <div>
+            <label className="input-label">Categoria</label>
+            <select className="input-field" value={form.categoryId}
+              onChange={e => handleCategoryChange(e.target.value)}>
+              <option value="">Sem categoria</option>
+              {catsFiltradas.map(c => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        {/* Conta bancária */}
-        <div>
-          <label className="input-label">Conta bancária</label>
-          <select className="input-field" value={form.bankAccountId}
-            onChange={e => setForm({ ...form, bankAccountId: e.target.value })}>
-            <option value="">Selecionar conta</option>
-            {contas.map(c => (
-              <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ''}</option>
-            ))}
-          </select>
-        </div>
+        {/* Conta bancária — Receita/Despesa: 1 dropdown. Transferência: 2 dropdowns */}
+        {!isTransferencia ? (
+          <div>
+            <label className="input-label">Conta bancária</label>
+            <select className="input-field" value={form.bankAccountId}
+              onChange={e => setForm({ ...form, bankAccountId: e.target.value })}>
+              <option value="">Selecionar conta</option>
+              {contas.map(c => (
+                <option key={c.id} value={c.id}>{c.nome}{c.banco ? ` — ${c.banco}` : ''}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="input-label">Conta de origem *</label>
+              <select className="input-field" value={form.bankAccountIdOrigem}
+                onChange={e => setForm({ ...form, bankAccountIdOrigem: e.target.value })}>
+                <option value="">Selecionar</option>
+                {contas.map(c => (
+                  <option key={c.id} value={c.id}
+                    disabled={c.id === form.bankAccountIdDestino}>
+                    {c.nome}{c.banco ? ` — ${c.banco}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="input-label">Conta de destino *</label>
+              <select className="input-field" value={form.bankAccountIdDestino}
+                onChange={e => setForm({ ...form, bankAccountIdDestino: e.target.value })}>
+                <option value="">Selecionar</option>
+                {contas.map(c => (
+                  <option key={c.id} value={c.id}
+                    disabled={c.id === form.bankAccountIdOrigem}>
+                    {c.nome}{c.banco ? ` — ${c.banco}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
 
         {/* Descrição */}
         <div>
-          <label className="input-label">Descrição</label>
+          <label className="input-label">
+            Descrição{isTransferencia ? ' *' : ''}
+          </label>
           <input className="input-field" placeholder="Ex: Pagamento NF 5542"
             value={form.descricao}
             onChange={e => setForm({ ...form, descricao: e.target.value })} />
@@ -193,15 +261,17 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
             onChange={e => setForm({ ...form, complemento: e.target.value })} />
         </div>
 
-        {/* Data competência */}
-        <div>
-          <label className="input-label">Data de competência
-            <span className="text-slate-400 font-normal"> (opcional — regime competência)</span>
-          </label>
-          <input type="date" className="input-field"
-            value={form.dataCompetencia}
-            onChange={e => setForm({ ...form, dataCompetencia: e.target.value })} />
-        </div>
+        {/* Data competência — só Receita/Despesa */}
+        {!isTransferencia && (
+          <div>
+            <label className="input-label">Data de competência
+              <span className="text-slate-400 font-normal"> (opcional — regime competência)</span>
+            </label>
+            <input type="date" className="input-field"
+              value={form.dataCompetencia}
+              onChange={e => setForm({ ...form, dataCompetencia: e.target.value })} />
+          </div>
+        )}
 
         {/* Campos Domínio — colapsável */}
         <div>

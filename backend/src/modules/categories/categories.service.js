@@ -1,6 +1,17 @@
 const prisma = require('../../config/database');
-async function list(tenantId) {
-  return prisma.category.findMany({ where:{ tenantId, ativo:true }, orderBy:[{ tipo:'asc' },{ nome:'asc' }] });
+async function list(tenantId, opts = {}) {
+  const { tipo, agrupadas } = opts;
+  const where = { tenantId, ativo: true };
+  if (tipo) where.tipo = tipo;
+  const cats = await prisma.category.findMany({ where, orderBy: [{ tipo: "asc" }, { nome: "asc" }] });
+  if (agrupadas === "true" || agrupadas === true) {
+    return {
+      receita: cats.filter(c => c.tipo === "receita"),
+      despesa: cats.filter(c => c.tipo === "despesa"),
+      transferencia: cats.filter(c => c.tipo === "transferencia"),
+    };
+  }
+  return cats;
 }
 async function create(tenantId, data) {
   const { nome, tipo, natureza, contaDebito, contaCredito, codHistorico, centroCustoD, centroCustoC, flagMercadoria } = data;

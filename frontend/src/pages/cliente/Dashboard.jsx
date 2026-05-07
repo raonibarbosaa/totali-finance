@@ -50,6 +50,45 @@ function TituloRow({ titulo }) {
   );
 }
 
+function CategoriaCard({ titulo, itens, tipo }) {
+  const total = itens.reduce((s, i) => s + i.total, 0);
+  const cor = tipo === 'receita' ? 'text-emerald-600' : 'text-red-500';
+  const corBarra = tipo === 'receita' ? 'bg-emerald-500' : 'bg-red-400';
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="font-display font-semibold text-navy-800 text-sm">{titulo}</h3>
+      </div>
+      <div className="card-body">
+        {itens.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-6">Nenhum lançamento no período</p>
+        ) : (
+          <div className="space-y-3">
+            {itens.map((item, idx) => {
+              const percent = total > 0 ? (item.total / total) * 100 : 0;
+              return (
+                <div key={idx}>
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <p className="text-sm text-slate-700 truncate flex-1 min-w-0">{item.categoria}</p>
+                    <div className="flex-shrink-0 text-right">
+                      <span className={`text-sm font-medium ${cor}`}>{formatCurrency(item.total)}</span>
+                      <span className="text-[10px] text-slate-400 ml-2">{percent.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full ${corBarra}`} style={{ width: `${percent}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardCliente() {
   const { tenant } = useAuthStore();
   const { hasRole } = useRole();
@@ -70,6 +109,7 @@ export default function DashboardCliente() {
           despesasMes: raw.despesas || 0,
           saldoTotal: raw.saldoTotal || 0,
           titulosAVencer: raw.titulosVencer || 0,
+          categorias: raw.categorias || { receitas: [], despesas: [] },
         } : null);
         setTitulos(titulosRes.data.data?.titles || []);
       } catch (_) {}
@@ -207,6 +247,22 @@ export default function DashboardCliente() {
           </div>
         </div>
       </div>
+
+      {/* Demonstrativo por categoria - somente nivel 1 e 2 */}
+      {hasRole(2) && stats?.categorias && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <CategoriaCard
+            titulo="Receitas por categoria"
+            itens={stats.categorias.receitas}
+            tipo="receita"
+          />
+          <CategoriaCard
+            titulo="Despesas por categoria"
+            itens={stats.categorias.despesas}
+            tipo="despesa"
+          />
+        </div>
+      )}
 
       {/* Aviso nível 3 */}
       {!hasRole(2) && (
