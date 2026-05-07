@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { authenticate }  = require('../../middleware/auth');
+const authenticate = require('../../middleware/auth');
 const ctrl = require('./admin.controller');
 
 // Apenas Admin Total acessa estas rotas
@@ -12,7 +12,8 @@ const adminOnly = (req, res, next) => {
 };
 
 router.use(authenticate, adminOnly);
-router.get('/dashboard',       ctrl.dashboard);
-router.get('/clients/:id',     ctrl.detail);
+
+router.get('/dashboard',   ctrl.dashboard);
+router.get('/clients/:id', ctrl.detail);
 
 module.exports = router;

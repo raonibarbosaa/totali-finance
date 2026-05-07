@@ -19,61 +19,49 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// ── Response interceptor: trata 401 e renova token ───
-let isRefreshing = false;
-let failedQueue = [];
-
-function processQueue(error, token = null) {
-  failedQueue.forEach((prom) => {
-    if (error) prom.reject(error);
-    else prom.resolve(token);
-  });
-  failedQueue = [];
+// ── Response interceptor: 401 → logout + redirect ────
+//
+// Política de sessão (Opção 2 — segurança em primeiro lugar):
+// - Não há refresh transparente do access token.
+// - Qualquer 401 desloga o usuário e o manda para /login.
+// - O usuário precisa re-logar e re-selecionar a empresa.
+// - Endpoints de auth (login/refresh/logout) são exceções para evitar loops.
+function isAuthEndpoint(url = '') {
+  return (
+    url.includes('/auth/login') ||
+    url.includes('/auth/refresh') ||
+    url.includes('/auth/logout')
+  );
 }
+
+let isRedirecting = false;
 
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
+  (error) => {
+    const status = error.response?.status;
+    const url = error.config?.url || '';
 
-    if (
-      error.response?.status === 401 &&
-      error.response?.data?.code === 'TOKEN_EXPIRED' &&
-      !originalRequest._retry
-    ) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
+    // 401 fora de endpoints de auth → sessão inválida/expirada → logout
+    if (status === 401 && !isAuthEndpoint(url) && !isRedirecting) {
+      isRedirecting = true;
 
       try {
-        // Tenta renovar via refresh token (cookie)
-        const { data } = await axios.post('/api/auth/refresh', {}, { withCredentials: true });
-        if (data.success) {
-          // Refresh não emite novo access token sem empresa selecionada
-          // Força re-seleção de empresa
-          useAuthStore.getState().setUser(data.data.user);
-          useAuthStore.getState().clearTenant();
-          processQueue(null, null);
-          return Promise.reject(new Error('RESELECT_COMPANY'));
-        }
-      } catch (refreshError) {
-        processQueue(refreshError, null);
         useAuthStore.getState().logout();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
+      } catch (_) {
+        // ignora qualquer erro do store — vamos redirecionar de qualquer jeito
       }
+
+      // Mostra mensagem ao usuário antes de redirecionar.
+      // setTimeout garante que o alert seja exibido fora do ciclo do axios.
+      setTimeout(() => {
+        try {
+          // eslint-disable-next-line no-alert
+          alert('Sessão expirada. Faça login novamente.');
+        } finally {
+          window.location.href = '/login';
+        }
+      }, 0);
     }
 
     return Promise.reject(error);

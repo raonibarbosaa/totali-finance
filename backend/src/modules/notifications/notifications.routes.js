@@ -1,7 +1,7 @@
 // notifications.controller.js + routes
 const express = require('express');
 const router  = express.Router();
-const { authenticate } = require('../../middleware/auth');
+const authenticate = require('../../middleware/auth');
 const svc = require('./notifications.service');
 
 const ok  = (res, data) => res.json({ success: true, data });

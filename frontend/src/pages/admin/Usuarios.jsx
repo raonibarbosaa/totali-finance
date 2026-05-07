@@ -25,6 +25,7 @@ export default function AdminUsuarios() {
   const [usuarios, setUsuarios] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [erroLista, setErroLista] = useState('');
   const [modal, setModal] = useState(false);
   const [modalVinculos, setModalVinculos] = useState(null);
   const [form, setForm] = useState(EMPTY_USER);
@@ -34,6 +35,7 @@ export default function AdminUsuarios() {
 
   const carregar = useCallback(async () => {
     setLoading(true);
+    setErroLista('');
     try {
       const [usersRes, tenantsRes] = await Promise.all([
         api.get('/users'),
@@ -41,7 +43,18 @@ export default function AdminUsuarios() {
       ]);
       setUsuarios(usersRes.data.data?.users || []);
       setTenants(tenantsRes.data.data?.tenants || []);
-    } catch (_) {}
+    } catch (err) {
+      // 401 já é tratado globalmente pelo interceptor do api.js (logout + redirect).
+      // Aqui só exibimos mensagem para outros erros (rede, 500, 403, etc.).
+      if (err?.response?.status !== 401) {
+        const msg = err?.response?.data?.error
+          || err?.message
+          || 'Erro ao carregar usuários.';
+        setErroLista(msg);
+        // eslint-disable-next-line no-console
+        console.error('[AdminUsuarios] erro ao carregar:', err);
+      }
+    }
     setLoading(false);
   }, []);
 
@@ -105,6 +118,13 @@ export default function AdminUsuarios() {
           <Plus size={15} /> Novo usuário
         </button>
       </div>
+
+      {erroLista && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm
+                        px-4 py-3 rounded-lg">
+          {erroLista}
+        </div>
+      )}
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
@@ -192,7 +212,9 @@ export default function AdminUsuarios() {
       <Modal open={modal} onClose={() => setModal(false)} title="Novo usuário Totali">
         <div className="space-y-4">
           <div>
-
+            <label className="input-label">Nome completo *</label>
+            <input className="input-field" placeholder="Nome do usuário" value={form.nome}
+              onChange={e => setForm({ ...form, nome: e.target.value })} />
           </div>
           <div>
             <label className="input-label">E-mail *</label>
@@ -206,9 +228,6 @@ export default function AdminUsuarios() {
               placeholder="Mínimo 8 caracteres" />
           </div>
           <div>
-            <label className="input-label">Nome completo *</label>
-            <input className="input-field" placeholder="Nome do usuário" value={form.nome}
-              onChange={e => setForm({ ...form, nome: e.target.value })} />
             <label className="input-label">Perfil</label>
             <select className="input-field" value={form.perfil}
               onChange={e => setForm({ ...form, perfil: e.target.value })}>
