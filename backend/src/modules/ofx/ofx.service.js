@@ -41,6 +41,14 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
     throw { status: 400, message: 'Nenhuma transação encontrada no arquivo OFX.' };
   }
 
+  // Alguns bancos emitem OFX malformado com todos os FITIDs iguais
+  // (ex: Kolek emite '1' para todas as transações). Detecta duplicatas
+  // intra-arquivo e substitui por FITIDs sintéticos baseados no conteúdo.
+  // Re-imports do mesmo conteúdo gerarão o mesmo hash sintético, mantendo
+  // dedup transacional funcional. (Dedup por hash do arquivo inteiro
+  // continua sendo a primeira linha de defesa contra reimport duplo.)
+  const fitidsSinteticos = garantirFitidsUnicos(parsed.transactions);
+
   return prisma.$transaction(async (tx) => {
     const dataInicio = parsed.period.start || parsed.transactions[0].dataMovimento;
     const dataFim    = parsed.period.end   || parsed.transactions[parsed.transactions.length - 1].dataMovimento;
@@ -661,6 +669,46 @@ async function recalcularContadoresImport(tx, ofxImportId) {
       pendentes:      summary.pendente,
     },
   });
+}
+
+/**
+ * Detecta FITIDs duplicados em parsed.transactions e substitui por sintéticos.
+ * Hash baseado em (fitid original + data + valor + tipo + descrição + memo + counter)
+ * pra garantir unicidade dentro do arquivo e estabilidade entre re-imports
+ * do mesmo conteúdo. Modifica o array in-place.
+ *
+ * Retorna o número de FITIDs que foram substituídos (informativo).
+ */
+function garantirFitidsUnicos(transactions) {
+  const counts = new Map();
+  for (const t of transactions) {
+    counts.set(t.fitid, (counts.get(t.fitid) || 0) + 1);
+  }
+  const temDuplicatas = [...counts.values()].some((c) => c > 1);
+  if (!temDuplicatas) return 0;
+
+  const seen = new Map(); // fitid original -> próximo counter de aparição
+  let substituidos = 0;
+  for (const t of transactions) {
+    if (counts.get(t.fitid) > 1) {
+      const counter = seen.get(t.fitid) || 0;
+      seen.set(t.fitid, counter + 1);
+      const input = [
+        t.fitid,
+        t.dataMovimento ? t.dataMovimento.toISOString() : '',
+        t.valor,
+        t.tipo,
+        t.memo || '',
+        t.descricao || '',
+        counter,
+      ].join('|');
+      const hash = crypto.createHash('sha256').update(input).digest('hex').slice(0, 24);
+      t.fitidOriginal = t.fitid;
+      t.fitid = `syn-${hash}`;
+      substituidos += 1;
+    }
+  }
+  return substituidos;
 }
 
 function truncar(s, max) {

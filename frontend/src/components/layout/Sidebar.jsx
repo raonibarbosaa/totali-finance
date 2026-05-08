@@ -97,7 +97,8 @@ export default function Sidebar() {
           <SidebarLink to="/app/contas-receber" icon={Wallet}>Contas a Receber</SidebarLink>
           </SidebarSection>
 
-          <SidebarLink to="/app/recorrencias-fixas" icon={Repeat}>Recorrências Fixas</SidebarLink>
+          <SidebarLink to="/app/recorrencias-fixas?tipo=pagar"   icon={Repeat}>Despesas Fixas</SidebarLink>
+          <SidebarLink to="/app/recorrencias-fixas?tipo=receber" icon={FileText}>Contratos Recorrentes</SidebarLink>
 
         <SidebarSection title="Cadastros">
           <SidebarLink to="/app/fornecedores" icon={Truck}>Fornecedores</SidebarLink>

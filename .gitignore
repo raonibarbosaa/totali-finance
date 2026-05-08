@@ -47,3 +47,4 @@ postgres-data/
 Resultado*.txt
 *.terminal.txt
 docs/legacy/
+*.bak
