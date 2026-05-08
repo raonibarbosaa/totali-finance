@@ -27,6 +27,7 @@ model Tenant {
   titles            Title[]
   recurringTitles   RecurringTitle[]
   ofxImports        OfxImport[]
+  ofxEntries        OfxEntry[]
   stockAdjustments  StockAdjustment[]
   periodClosings    PeriodClosing[]
   exportLogs        ExportLog[]
@@ -110,6 +111,7 @@ model BankAccount {
   transactions Transaction[]
   titles       Title[]
   ofxImports   OfxImport[]
+  ofxEntries   OfxEntry[]
 
   @@index([tenantId])
   @@map("bank_accounts")
@@ -135,6 +137,7 @@ model Category {
   titles          Title[]
   recurringTitles RecurringTitle[]
   ofxPatterns     OfxPattern[]
+  ofxEntriesSugeridas OfxEntry[] @relation("OfxEntrySuggestedCategory")
 
   @@index([tenantId])
   @@map("categories")
@@ -176,7 +179,10 @@ model Transaction {
   origem          String   @default("manual") @db.VarChar(20)
   ofxImportId     String?  @map("ofx_import_id")
   tituloId        String?  @map("titulo_id")
+  customerId      String?  @map("customer_id")
+  supplierId      String?  @map("supplier_id")
   exportado       Boolean  @default(false)
+  conciliadoEm    DateTime? @map("conciliado_em")
   criadoPor       String?  @map("criado_por")
   criadoEm        DateTime @default(now()) @map("criado_em")
   atualizadoEm    DateTime @updatedAt @map("atualizado_em")
@@ -185,12 +191,18 @@ model Transaction {
   bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
   category    Category?    @relation(fields: [categoryId], references: [id])
   criador     User?        @relation("TransacaoCriadaPor", fields: [criadoPor], references: [id])
+  customer    Customer?    @relation(fields: [customerId], references: [id])
+  supplier    Supplier?    @relation(fields: [supplierId], references: [id])
+  ofxEntry    OfxEntry?
 
   @@index([tenantId])
   @@index([tenantId, dataLancamento])
   @@index([tenantId, bankAccountId])
   @@index([tenantId, status])
   @@index([tenantId, exportado])
+  @@index([tenantId, customerId])
+  @@index([tenantId, supplierId])
+  @@index([tenantId, conciliadoEm])
   @@map("transactions")
 }
 
@@ -294,6 +306,7 @@ model OfxImport {
   tenantId       String   @map("tenant_id")
   bankAccountId  String   @map("bank_account_id")
   nomeArquivo    String?  @map("nome_arquivo") @db.VarChar(255)
+  hashArquivo    String?  @map("hash_arquivo") @db.VarChar(64)
   dataInicio     DateTime? @map("data_inicio") @db.Date
   dataFim        DateTime? @map("data_fim") @db.Date
   totalRegistros Int?     @map("total_registros")
@@ -305,8 +318,59 @@ model OfxImport {
   tenant      Tenant      @relation(fields: [tenantId], references: [id])
   bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
   importador  User?       @relation(fields: [importadoPor], references: [id])
+  entries     OfxEntry[]
 
+  @@unique([tenantId, hashArquivo])
   @@map("ofx_imports")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OfxEntry — uma linha individual de extrato OFX importado.
+//
+// Cada arquivo OFX gera 1 OfxImport (cabeçalho) + N OfxEntries (uma por
+// transação do arquivo). Cada entry pode estar:
+//   • pendente   — ainda não vinculada a um Transaction
+//   • conciliado — vinculada a um Transaction (auto ou manualmente)
+//   • ignorado   — usuário marcou como "não vai virar lançamento"
+//
+// Dedup: `(bankAccountId, fitid)` é único — a mesma transação OFX (mesmo FITID)
+// nunca aparece duas vezes na mesma conta, mesmo se importada em arquivos
+// distintos.
+//
+// `transactionId` é único — relação 1-para-1 com Transaction. N-para-1 e 1-para-N
+// não estão suportados nesta etapa (planejado para versões futuras).
+//
+// `suggestedCategoryId` é preenchido pelo casamento com OfxPattern e serve como
+// pré-seleção no quick-create da Etapa 5C (não é vinculação obrigatória).
+// ─────────────────────────────────────────────────────────────────────────────
+model OfxEntry {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  ofxImportId         String   @map("ofx_import_id")
+  bankAccountId       String   @map("bank_account_id")
+  fitid               String   @db.VarChar(255)
+  dataMovimento       DateTime @map("data_movimento") @db.Date
+  valor               Decimal  @db.Decimal(15, 2)
+  tipo                String   @db.VarChar(20)
+  descricao           String?  @db.VarChar(500)
+  memo                String?  @db.VarChar(500)
+  status              String   @default("pendente") @db.VarChar(20)
+  transactionId       String?  @unique @map("transaction_id")
+  suggestedCategoryId String?  @map("suggested_category_id")
+  conciliadoEm        DateTime? @map("conciliado_em")
+  ignoradoEm          DateTime? @map("ignorado_em")
+  criadoEm            DateTime @default(now()) @map("criado_em")
+
+  tenant            Tenant       @relation(fields: [tenantId], references: [id])
+  ofxImport         OfxImport    @relation(fields: [ofxImportId], references: [id], onDelete: Cascade)
+  bankAccount       BankAccount  @relation(fields: [bankAccountId], references: [id])
+  transaction       Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  suggestedCategory Category?    @relation("OfxEntrySuggestedCategory", fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
+
+  @@unique([bankAccountId, fitid])
+  @@index([tenantId, status])
+  @@index([ofxImportId])
+  @@map("ofx_entries")
 }
 
 model StockAdjustment {
@@ -395,8 +459,9 @@ model Supplier {
   criadoEm      DateTime       @default(now()) @map("criado_em")
   atualizadoEm  DateTime       @updatedAt      @map("atualizado_em")
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id])
-  titles Title[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  titles       Title[]
+  transactions Transaction[]
 
   @@index([tenantId, ativo])
   @@index([tenantId, nome])
@@ -417,8 +482,9 @@ model Customer {
   criadoEm      DateTime       @default(now()) @map("criado_em")
   atualizadoEm  DateTime       @updatedAt      @map("atualizado_em")
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id])
-  titles Title[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  titles       Title[]
+  transactions Transaction[]
 
   @@index([tenantId, ativo])
   @@index([tenantId, nome])
