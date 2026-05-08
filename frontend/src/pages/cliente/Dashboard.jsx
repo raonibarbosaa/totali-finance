@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  TrendingUp, TrendingDown, Wallet, AlertCircle,
+  TrendingUp, TrendingDown, Wallet, AlertCircle, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Clock, CheckCircle2
 } from 'lucide-react';
 import api from '../../services/api';
@@ -89,11 +89,60 @@ function CategoriaCard({ titulo, itens, tipo }) {
   );
 }
 
+// Alerta de qualidade dos dados:
+// mostra lançamentos efetivados do mês corrente que não têm categoria.
+// Só renderiza se houver pelo menos 1 — fica invisível quando tudo OK.
+function SemCategoriaAlert({ data }) {
+  if (!data || data.count === 0) return null;
+  const { count, items } = data;
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-3 mb-1">
+            <p className="text-sm font-semibold text-amber-900">
+              {count} lançamento{count > 1 ? 's' : ''} sem categoria neste mês
+            </p>
+            <a href="/app/lancamentos"
+              className="text-xs font-medium text-amber-700 hover:text-amber-900 whitespace-nowrap flex-shrink-0">
+              Ver todos →
+            </a>
+          </div>
+          <p className="text-xs text-amber-700 mb-3">
+            Lançamentos sem categoria podem comprometer relatórios e exportação contábil.
+            Edite-os para classificar corretamente.
+          </p>
+          {items.length > 0 && (
+            <div className="space-y-1.5 border-t border-amber-200 pt-2.5">
+              {items.map(t => (
+                <div key={t.id} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-600 truncate flex-1 min-w-0">
+                    <span className="text-slate-400">{formatDate(t.dataLancamento)}</span>
+                    {' · '}
+                    {t.descricao}
+                  </span>
+                  <span className={`font-medium flex-shrink-0 ${
+                    t.tipo === 'receita' ? 'text-emerald-600' : 'text-red-500'
+                  }`}>
+                    {t.tipo === 'receita' ? '+' : '-'}{formatCurrency(Math.abs(t.valor))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardCliente() {
   const { tenant } = useAuthStore();
   const { hasRole } = useRole();
   const [stats, setStats] = useState(null);
   const [titulos, setTitulos] = useState([]);
+  const [semCategoria, setSemCategoria] = useState({ count: 0, items: [] });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -111,7 +160,8 @@ export default function DashboardCliente() {
           titulosAVencer: raw.titulosVencer || 0,
           categorias: raw.categorias || { receitas: [], despesas: [] },
         } : null);
-        setTitulos(titulosRes.data.data?.titles || []);
+        setSemCategoria(raw?.lancamentosSemCategoria || { count: 0, items: [] });
+        setTitulos(titulosRes.data.data?.data || []);
       } catch (_) {}
       setLoading(false);
     }
@@ -174,6 +224,9 @@ export default function DashboardCliente() {
           )}
         </div>
       )}
+
+      {/* Alerta: lançamentos sem categoria — só nível 2+ */}
+      {hasRole(2) && !loading && <SemCategoriaAlert data={semCategoria} />}
 
       {/* Títulos em aberto */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

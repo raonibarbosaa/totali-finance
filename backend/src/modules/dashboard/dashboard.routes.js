@@ -28,19 +28,27 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
       origem: { not: 'transferencia' },
     };
 
+    // Filtro do mês corrente (atalho usado nas várias agregações de mês)
+    const filterMesCorrente = {
+      ...baseFilter,
+      dataLancamento: { gte: firstDay, lte: lastDay },
+    };
+
     const [
       receitas,
       despesas,
       titulos,
       contasComSaldo,
       gruposPorCategoria,
+      semCategoriaCount,
+      semCategoriaItens,
     ] = await Promise.all([
       prisma.transaction.aggregate({
-        where: { ...baseFilter, tipo: 'receita', dataLancamento: { gte: firstDay, lte: lastDay } },
+        where: { ...filterMesCorrente, tipo: 'receita' },
         _sum: { valor: true },
       }),
       prisma.transaction.aggregate({
-        where: { ...baseFilter, tipo: 'despesa', dataLancamento: { gte: firstDay, lte: lastDay } },
+        where: { ...filterMesCorrente, tipo: 'despesa' },
         _sum: { valor: true },
       }),
       prisma.title.count({
@@ -53,8 +61,27 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
       bankAccountsService.list(tenantId),
       prisma.transaction.groupBy({
         by: ['tipo', 'categoryId'],
-        where: { ...baseFilter, dataLancamento: { gte: firstDay, lte: lastDay } },
+        where: filterMesCorrente,
         _sum: { valor: true },
+      }),
+      // ── Alerta de qualidade: lançamentos efetivados sem categoria
+      // no mês corrente (excluindo transferências, que naturalmente
+      // não têm categoria).
+      prisma.transaction.count({
+        where: { ...filterMesCorrente, categoryId: null },
+      }),
+      prisma.transaction.findMany({
+        where: { ...filterMesCorrente, categoryId: null },
+        orderBy: { dataLancamento: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          dataLancamento: true,
+          descricao: true,
+          complemento: true,
+          valor: true,
+          tipo: true,
+        },
       }),
     ]);
 
@@ -89,6 +116,16 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
         categorias: {
           receitas: formatGrupo('receita'),
           despesas: formatGrupo('despesa'),
+        },
+        lancamentosSemCategoria: {
+          count: semCategoriaCount,
+          items: semCategoriaItens.map(t => ({
+            id: t.id,
+            dataLancamento: t.dataLancamento,
+            descricao: t.descricao || t.complemento || '—',
+            valor: Number(t.valor),
+            tipo: t.tipo,
+          })),
         },
       },
     });
