@@ -11,6 +11,11 @@ const userRoutes = require('./modules/users/users.routes');
 
 const app = express();
 
+// ── Trust proxy (atrás do nginx) ──────────────────────
+// Necessário para express-rate-limit identificar IPs corretamente
+// via X-Forwarded-For. '1' = confia apenas no primeiro proxy (nginx).
+app.set('trust proxy', 1);
+
 // ── Segurança ─────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
