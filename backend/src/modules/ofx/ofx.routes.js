@@ -10,8 +10,6 @@ const ctrl   = require('./ofx.controller');
 
 const router = express.Router();
 
-// Upload em memória (arquivos OFX são pequenos — limite 5 MB).
-// Aceita .ofx por extensão ou mimetypes plausíveis (servidor-cliente variam).
 const upload = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: 5 * 1024 * 1024 },
@@ -23,7 +21,6 @@ const upload = multer({
   },
 });
 
-// Wrapper para devolver erros do multer no formato padrão da API
 const handleUpload = (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (!err) return next();
@@ -45,12 +42,12 @@ router.get   ('/imports/:id/entries',     rGuard([1, 2]),                ctrl.li
 router.post  ('/import',                  rGuard([1, 2]), handleUpload,  ctrl.importFile);
 router.delete('/imports/:id',             rGuard([1]),                   ctrl.removeImport);
 
-// ── Ações sobre entries (Etapa 5B — stubs 501 por ora) ────────────────────
-router.post  ('/entries/:id/link',          rGuard([1, 2]), ctrl.linkEntry);
-router.post  ('/entries/:id/unlink',        rGuard([1, 2]), ctrl.unlinkEntry);
-router.post  ('/entries/:id/ignore',        rGuard([1, 2]), ctrl.ignoreEntry);
-
-// ── Quick-create (Etapa 5C — stub 501) ────────────────────────────────────
-router.post  ('/entries/:id/quick-create',  rGuard([1, 2]), ctrl.quickCreateFromEntry);
+// ── Ações sobre entries (Etapa 5B) ────────────────────────────────────────
+router.get   ('/entries/:id/match-candidates', rGuard([1, 2]), ctrl.matchCandidates);
+router.post  ('/entries/:id/link',             rGuard([1, 2]), ctrl.linkEntry);
+router.post  ('/entries/:id/unlink',           rGuard([1, 2]), ctrl.unlinkEntry);
+router.post  ('/entries/:id/ignore',           rGuard([1, 2]), ctrl.ignoreEntry);
+router.post  ('/entries/:id/unignore',         rGuard([1, 2]), ctrl.unignoreEntry);
+router.post  ('/entries/:id/quick-create',     rGuard([1, 2]), ctrl.quickCreateFromEntry);
 
 module.exports = router;

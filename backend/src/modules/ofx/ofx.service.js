@@ -5,47 +5,17 @@ const prisma = require('../../config/database');
 const { parseOfx } = require('./ofx-parser');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Importação de arquivo OFX
+// Importação de arquivo OFX (Etapa 5A)
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Pipeline:
-//   1. Valida que a conta bancária pertence ao tenant.
-//   2. Calcula SHA256 do arquivo. Se já existir um OfxImport com o mesmo hash
-//      no tenant, retorna 409 (DUPLICATE_FILE) com referência ao import original.
-//   3. Faz parse do conteúdo OFX (parser tolera SGML 1.x e XML 2.x).
-//   4. Filtra transações cujo FITID já existe na mesma conta — assim, mesmo
-//      arquivos diferentes mas com sobreposição de período não duplicam linhas.
-//   5. Cria OfxImport (cabeçalho) + OfxEntries (linhas individuais).
-//   6. Tenta auto-match RÍGIDO contra Transactions existentes:
-//        • mesmo bankAccountId
-//        • mesma data exata (DATE)
-//        • mesmo valor exato
-//        • mesma direção (credito↔receita, debito↔despesa)
-//        • Transaction ainda não conciliada e sem entry vinculado
-//      Quando casa, seta OfxEntry.transactionId, OfxEntry.status='conciliado',
-//      e Transaction.conciliadoEm = agora.
-//   7. Para entries que ficam pendentes, aplica padrões OFX (textoHistorico
-//      LIKE) para preencher suggestedCategoryId — vai ajudar no quick-create
-//      da Etapa 5C.
-//   8. Atualiza contadores no OfxImport (totalRegistros, conciliados, pendentes).
-//
 async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileName }) {
-  if (!bankAccountId) {
-    throw { status: 400, message: 'Conta bancária obrigatória.' };
-  }
-  if (!fileBuffer || !fileBuffer.length) {
-    throw { status: 400, message: 'Arquivo OFX não recebido.' };
-  }
+  if (!bankAccountId) throw { status: 400, message: 'Conta bancária obrigatória.' };
+  if (!fileBuffer || !fileBuffer.length) throw { status: 400, message: 'Arquivo OFX não recebido.' };
 
-  // 1. Conta deve pertencer ao tenant
   const conta = await prisma.bankAccount.findFirst({
     where: { id: bankAccountId, tenantId, ativo: true },
   });
-  if (!conta) {
-    throw { status: 404, message: 'Conta bancária não encontrada.' };
-  }
+  if (!conta) throw { status: 404, message: 'Conta bancária não encontrada.' };
 
-  // 2. Hash de dedup
   const hashArquivo = crypto.createHash('sha256').update(fileBuffer).digest('hex');
   const existing = await prisma.ofxImport.findFirst({
     where: { tenantId, hashArquivo },
@@ -61,7 +31,6 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
     };
   }
 
-  // 3. Parse
   let parsed;
   try {
     parsed = parseOfx(fileBuffer);
@@ -72,9 +41,7 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
     throw { status: 400, message: 'Nenhuma transação encontrada no arquivo OFX.' };
   }
 
-  // 4–8 dentro de transação
   return prisma.$transaction(async (tx) => {
-    // 5a. Cria cabeçalho do import
     const dataInicio = parsed.period.start || parsed.transactions[0].dataMovimento;
     const dataFim    = parsed.period.end   || parsed.transactions[parsed.transactions.length - 1].dataMovimento;
 
@@ -91,7 +58,6 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
       },
     });
 
-    // 5b. FITIDs já presentes nesta conta (em qualquer import anterior)
     const fitids = parsed.transactions.map((t) => t.fitid);
     const existingFitids = new Set(
       (await tx.ofxEntry.findMany({
@@ -100,7 +66,6 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
       })).map((e) => e.fitid)
     );
 
-    // 5c. Cria apenas as entries com FITID novo
     const novasEntriesData = parsed.transactions
       .filter((t) => !existingFitids.has(t.fitid))
       .map((t) => ({
@@ -110,16 +75,13 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
         fitid:         t.fitid,
         dataMovimento: t.dataMovimento,
         valor:         t.valor,
-        tipo:          t.tipo,           // 'credito' | 'debito'
+        tipo:          t.tipo,
         descricao:     truncar(t.descricao, 500),
         memo:          truncar(t.memo, 500),
         status:        'pendente',
       }));
 
     if (novasEntriesData.length === 0) {
-      // Arquivo legítimo (hash diferente) mas todas as transações já
-      // foram importadas em outro arquivo via FITID. Mantém o cabeçalho
-      // como rastro mas zera os contadores.
       await tx.ofxImport.update({
         where: { id: imp.id },
         data: { totalRegistros: 0, conciliados: 0, pendentes: 0 },
@@ -136,13 +98,11 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
 
     await tx.ofxEntry.createMany({ data: novasEntriesData });
 
-    // Recarrega com IDs (createMany do Prisma não retorna registros)
     const entries = await tx.ofxEntry.findMany({
       where:   { ofxImportId: imp.id },
       orderBy: { dataMovimento: 'asc' },
     });
 
-    // 6. Auto-match rígido
     let autoConciliados = 0;
     for (const e of entries) {
       const tipoTransaction = e.tipo === 'credito' ? 'receita' : 'despesa';
@@ -177,10 +137,8 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
       }
     }
 
-    // 7. Sugere categoria nas pendentes
     await aplicarSugestoesCategoria(tx, tenantId, imp.id);
 
-    // 8. Contadores
     const pendentes = entries.length - autoConciliados;
     await tx.ofxImport.update({
       where: { id: imp.id },
@@ -202,7 +160,6 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
   });
 }
 
-/** Pré-popula suggestedCategoryId de entries pendentes via OfxPattern. */
 async function aplicarSugestoesCategoria(tx, tenantId, ofxImportId) {
   const padroes = await tx.ofxPattern.findMany({
     where:  { tenantId, ativo: true },
@@ -231,7 +188,7 @@ async function aplicarSugestoesCategoria(tx, tenantId, ofxImportId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Listagens
+// Listagens (Etapa 5A)
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function listImports(tenantId, filters = {}) {
@@ -277,7 +234,7 @@ async function findImport(id, tenantId) {
 }
 
 async function listEntries(importId, tenantId, filters = {}) {
-  const imp = await findImport(importId, tenantId); // garante isolamento
+  const imp = await findImport(importId, tenantId);
   const { status } = filters;
 
   const entries = await prisma.ofxEntry.findMany({
@@ -298,7 +255,6 @@ async function listEntries(importId, tenantId, filters = {}) {
     orderBy: [{ dataMovimento: 'asc' }, { criadoEm: 'asc' }],
   });
 
-  // Conta por status (todas, ignorando filtro) — útil pros badges da UI
   const counts = await prisma.ofxEntry.groupBy({
     by:   ['status'],
     where: { ofxImportId: importId, tenantId },
@@ -311,41 +267,401 @@ async function listEntries(importId, tenantId, filters = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Remoção de import
+// Remoção de import (Etapa 5A — atualizado na 5B)
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Deletar um import desfaz a conciliação de todas as Transactions vinculadas,
-// remove as OfxEntries e remove o cabeçalho. Não toca em Transactions criadas
-// via quick-create (Etapa 5C) — essas terão `origem='ofx'` e `ofxImportId` setado;
-// o usuário precisará removê-las manualmente se quiser.
+// Comportamento ajustado na 5B: Transactions criadas via quick-create
+// (origem='ofx' e ofxImportId apontando pra ESTE import) são apagadas junto.
+// Transactions que existiam antes do import (manual) e foram só conciliadas
+// pelo auto-match são apenas desconciliadas — nunca são deletadas.
 //
 async function removeImport(id, tenantId) {
   const imp = await prisma.ofxImport.findFirst({ where: { id, tenantId } });
   if (!imp) throw { status: 404, message: 'Importação OFX não encontrada.' };
 
   return prisma.$transaction(async (tx) => {
+    // Transactions vinculadas a entries deste import
     const linkedEntries = await tx.ofxEntry.findMany({
       where:  { ofxImportId: id, transactionId: { not: null } },
-      select: { transactionId: true },
+      select: { transactionId: true, transaction: { select: { origem: true, ofxImportId: true, exportado: true } } },
     });
-    const txIds = linkedEntries.map((e) => e.transactionId).filter(Boolean);
 
-    if (txIds.length) {
+    const txsParaDeletar = [];
+    const txsParaDesconciliar = [];
+
+    for (const e of linkedEntries) {
+      const t = e.transaction;
+      if (!t) continue;
+
+      const veioDoQuickCreate = t.origem === 'ofx' && t.ofxImportId === id;
+
+      if (veioDoQuickCreate) {
+        if (t.exportado) {
+          // Lançamento já exportado pra Domínio — não pode deletar.
+          // Mantém a Transaction, só desconcilia.
+          txsParaDesconciliar.push(e.transactionId);
+        } else {
+          txsParaDeletar.push(e.transactionId);
+        }
+      } else {
+        txsParaDesconciliar.push(e.transactionId);
+      }
+    }
+
+    if (txsParaDesconciliar.length) {
       await tx.transaction.updateMany({
-        where: { id: { in: txIds } },
+        where: { id: { in: txsParaDesconciliar } },
         data:  { conciliadoEm: null },
       });
     }
 
+    // Apaga as entries antes de apagar Transactions, pra liberar a FK
     await tx.ofxEntry.deleteMany({ where: { ofxImportId: id } });
+
+    if (txsParaDeletar.length) {
+      await tx.transaction.deleteMany({ where: { id: { in: txsParaDeletar } } });
+    }
+
     await tx.ofxImport.delete({ where: { id } });
-    return { ok: true, transactionsDesconciliadas: txIds.length };
+
+    return {
+      ok: true,
+      transactionsDesconciliadas: txsParaDesconciliar.length,
+      transactionsDeletadas:      txsParaDeletar.length,
+    };
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Ações sobre entries (Etapa 5B)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Vincula uma entry pendente a uma Transaction existente. */
+async function linkEntry(entryId, tenantId, body = {}) {
+  const { transactionId } = body;
+  if (!transactionId) throw { status: 400, message: 'transactionId obrigatório.' };
+
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+  if (entry.status === 'conciliado' && entry.transactionId) {
+    throw { status: 400, message: 'Esta entry já está conciliada. Desvincule antes de vincular novamente.' };
+  }
+
+  const transaction = await prisma.transaction.findFirst({
+    where: { id: transactionId, tenantId },
+    include: { ofxEntry: { select: { id: true } } },
+  });
+  if (!transaction) throw { status: 404, message: 'Lançamento não encontrado.' };
+  if (transaction.bankAccountId !== entry.bankAccountId) {
+    throw { status: 400, message: 'Lançamento é de outra conta bancária.' };
+  }
+  if (transaction.status === 'cancelado') {
+    throw { status: 400, message: 'Lançamento cancelado não pode ser conciliado.' };
+  }
+  if (transaction.ofxEntry) {
+    throw { status: 400, message: 'Este lançamento já está vinculado a outra entry OFX.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const agora = new Date();
+    const updatedEntry = await tx.ofxEntry.update({
+      where: { id: entryId },
+      data:  {
+        transactionId,
+        status:       'conciliado',
+        conciliadoEm: agora,
+      },
+      include: {
+        transaction: {
+          include: {
+            category:    { select: { id: true, nome: true } },
+            bankAccount: { select: { id: true, nome: true } },
+          },
+        },
+      },
+    });
+
+    await tx.transaction.update({
+      where: { id: transactionId },
+      data:  { conciliadoEm: agora },
+    });
+
+    await recalcularContadoresImport(tx, entry.ofxImportId);
+
+    return updatedEntry;
+  });
+}
+
+/** Desfaz a conciliação: entry volta a 'pendente', transaction perde conciliadoEm. */
+async function unlinkEntry(entryId, tenantId) {
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+    include: {
+      transaction: { select: { id: true, origem: true, ofxImportId: true, exportado: true } },
+    },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+  if (entry.status !== 'conciliado' || !entry.transactionId) {
+    throw { status: 400, message: 'Esta entry não está conciliada.' };
+  }
+
+  // Bloqueia desvincular se a Transaction veio de quick-create + foi exportada,
+  // pra evitar entry órfã apontando pra Transaction "intocável" sem trilha.
+  const t = entry.transaction;
+  const veioDoQuickCreate = t && t.origem === 'ofx' && t.ofxImportId === entry.ofxImportId;
+  if (veioDoQuickCreate && t.exportado) {
+    throw {
+      status: 400,
+      message: 'Lançamento criado por esta entry já foi exportado pra Domínio e não pode ser desvinculado.',
+    };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updatedEntry = await tx.ofxEntry.update({
+      where: { id: entryId },
+      data:  {
+        transactionId: null,
+        status:        'pendente',
+        conciliadoEm:  null,
+      },
+    });
+
+    if (entry.transactionId) {
+      await tx.transaction.update({
+        where: { id: entry.transactionId },
+        data:  { conciliadoEm: null },
+      });
+    }
+
+    await recalcularContadoresImport(tx, entry.ofxImportId);
+
+    return updatedEntry;
+  });
+}
+
+/** Marca entry pendente como 'ignorada'. */
+async function ignoreEntry(entryId, tenantId) {
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+  if (entry.status !== 'pendente') {
+    throw { status: 400, message: 'Apenas entries pendentes podem ser ignoradas.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.ofxEntry.update({
+      where: { id: entryId },
+      data:  { status: 'ignorado', ignoradoEm: new Date() },
+    });
+    await recalcularContadoresImport(tx, entry.ofxImportId);
+    return updated;
+  });
+}
+
+/** Reverte 'ignorada' → 'pendente'. */
+async function unignoreEntry(entryId, tenantId) {
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+  if (entry.status !== 'ignorado') {
+    throw { status: 400, message: 'Esta entry não está ignorada.' };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.ofxEntry.update({
+      where: { id: entryId },
+      data:  { status: 'pendente', ignoradoEm: null },
+    });
+    await recalcularContadoresImport(tx, entry.ofxImportId);
+    return updated;
+  });
+}
+
+/**
+ * Sugere candidatos pra vínculo manual de uma entry pendente.
+ *
+ * Filtros: mesma conta bancária, status != cancelado, sem entry vinculada,
+ * valor com tolerância de ±10% e data com tolerância de ±5 dias.
+ *
+ * Ordena por proximidade (data + valor) e retorna até 20.
+ */
+async function matchCandidates(entryId, tenantId, opts = {}) {
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+
+  const tipoTransaction = entry.tipo === 'credito' ? 'receita' : 'despesa';
+  const valor = Number(entry.valor);
+  const valorMin = valor * 0.90;
+  const valorMax = valor * 1.10;
+  const dataMin = new Date(entry.dataMovimento);
+  dataMin.setDate(dataMin.getDate() - 5);
+  const dataMax = new Date(entry.dataMovimento);
+  dataMax.setDate(dataMax.getDate() + 5);
+
+  const candidatos = await prisma.transaction.findMany({
+    where: {
+      tenantId,
+      bankAccountId:  entry.bankAccountId,
+      tipo:           tipoTransaction,
+      conciliadoEm:   null,
+      ofxEntry:       { is: null },
+      status:         { not: 'cancelado' },
+      dataLancamento: { gte: dataMin, lte: dataMax },
+      valor:          { gte: valorMin, lte: valorMax },
+    },
+    include: {
+      category:    { select: { id: true, nome: true } },
+      bankAccount: { select: { id: true, nome: true } },
+    },
+    orderBy: { dataLancamento: 'asc' },
+    take: 50, // pega mais e ordena por proximidade na app
+  });
+
+  const refTime = entry.dataMovimento.getTime();
+  const sorted = candidatos
+    .map((c) => ({
+      ...c,
+      _distancia: {
+        dias:        Math.abs((c.dataLancamento.getTime() - refTime) / 86400000),
+        valorPct:    Math.abs((Number(c.valor) - valor) / valor),
+      },
+    }))
+    .sort((a, b) => {
+      // Match perfeito de data primeiro, depois proximidade combinada
+      const scoreA = a._distancia.dias + a._distancia.valorPct * 10;
+      const scoreB = b._distancia.dias + b._distancia.valorPct * 10;
+      return scoreA - scoreB;
+    })
+    .slice(0, 20);
+
+  return { entry, candidatos: sorted };
+}
+
+/**
+ * Quick-create: cria uma Transaction nova já conciliada com a entry.
+ *
+ * Pré-preenche tudo a partir da entry. Body pode sobrescrever:
+ *   { categoryId?, descricao?, complemento?, dataCompetencia? }
+ *
+ * Importante: Transaction.origem = 'ofx', Transaction.ofxImportId = entry.ofxImportId.
+ * Se o usuário deletar o import depois, essa Transaction é apagada junto
+ * (tratado em removeImport).
+ */
+async function quickCreateFromEntry(entryId, tenantId, userId, body = {}) {
+  const entry = await prisma.ofxEntry.findFirst({
+    where: { id: entryId, tenantId },
+  });
+  if (!entry) throw { status: 404, message: 'Entry OFX não encontrada.' };
+  if (entry.status === 'conciliado' && entry.transactionId) {
+    throw { status: 400, message: 'Esta entry já está conciliada.' };
+  }
+
+  const tipoTransaction = entry.tipo === 'credito' ? 'receita' : 'despesa';
+  const categoryId = body.categoryId !== undefined
+    ? (body.categoryId || null)
+    : (entry.suggestedCategoryId || null);
+
+  // Se há categoria, puxa os campos de Domínio Contábil
+  let dominioFields = {};
+  if (categoryId) {
+    const cat = await prisma.category.findFirst({
+      where: { id: categoryId, tenantId },
+    });
+    if (cat) {
+      dominioFields = {
+        contaDebito:  cat.contaDebito,
+        contaCredito: cat.contaCredito,
+        codHistorico: cat.codHistorico,
+        centroCustoD: cat.centroCustoD,
+        centroCustoC: cat.centroCustoC,
+      };
+    }
+  }
+
+  const descricaoBase = body.descricao || entry.descricao || entry.memo || '(sem descrição)';
+  const complementoBase = body.complemento !== undefined
+    ? (body.complemento || null)
+    : (entry.descricao && entry.memo && entry.descricao !== entry.memo ? entry.memo : null);
+
+  return prisma.$transaction(async (tx) => {
+    const agora = new Date();
+    const novaTransaction = await tx.transaction.create({
+      data: {
+        tenantId,
+        tipo:            tipoTransaction,
+        descricao:       truncar(descricaoBase, 500),
+        complemento:     truncar(complementoBase, 500),
+        valor:           entry.valor,
+        dataLancamento:  entry.dataMovimento,
+        dataCompetencia: body.dataCompetencia ? new Date(body.dataCompetencia) : entry.dataMovimento,
+        bankAccountId:   entry.bankAccountId,
+        categoryId,
+        status:          'realizado',
+        origem:          'ofx',
+        ofxImportId:     entry.ofxImportId,
+        criadoPor:       userId,
+        conciliadoEm:    agora,
+        ...dominioFields,
+      },
+    });
+
+    const updatedEntry = await tx.ofxEntry.update({
+      where: { id: entryId },
+      data:  {
+        transactionId: novaTransaction.id,
+        status:        'conciliado',
+        conciliadoEm:  agora,
+      },
+      include: {
+        transaction: {
+          include: {
+            category:    { select: { id: true, nome: true } },
+            bankAccount: { select: { id: true, nome: true } },
+          },
+        },
+      },
+    });
+
+    await recalcularContadoresImport(tx, entry.ofxImportId);
+
+    return updatedEntry;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers internos
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recalcula os 3 contadores do OfxImport baseado no estado atual das entries.
+ * Chamado depois de qualquer mudança de status de entry pra garantir consistência.
+ */
+async function recalcularContadoresImport(tx, ofxImportId) {
+  const counts = await tx.ofxEntry.groupBy({
+    by:    ['status'],
+    where: { ofxImportId },
+    _count: { _all: true },
+  });
+  const summary = { pendente: 0, conciliado: 0, ignorado: 0 };
+  for (const c of counts) summary[c.status] = c._count._all;
+
+  const total = summary.pendente + summary.conciliado + summary.ignorado;
+
+  await tx.ofxImport.update({
+    where: { id: ofxImportId },
+    data:  {
+      totalRegistros: total,
+      conciliados:    summary.conciliado,
+      pendentes:      summary.pendente,
+    },
+  });
+}
 
 function truncar(s, max) {
   if (!s) return null;
@@ -359,9 +675,17 @@ function formatDateBR(date) {
 }
 
 module.exports = {
+  // 5A
   importFile,
   listImports,
   findImport,
   listEntries,
   removeImport,
+  // 5B
+  linkEntry,
+  unlinkEntry,
+  ignoreEntry,
+  unignoreEntry,
+  matchCandidates,
+  quickCreateFromEntry,
 };

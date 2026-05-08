@@ -14,6 +14,8 @@ const err = (res, e) => {
   res.status(status).json(body);
 };
 
+// ─── Etapa 5A ─────────────────────────────────────────────────────────────
+
 exports.importFile = async (req, res) => {
   try {
     if (!req.file) {
@@ -53,14 +55,38 @@ exports.removeImport = async (req, res) => {
   catch (e) { err(res, e); }
 };
 
-// ─── Etapa 5B (em breve) ──────────────────────────────────────────────────
-const notImpl = (etapa) => (req, res) => res.status(501).json({
-  success: false,
-  error:   `Funcionalidade prevista para a Etapa ${etapa}.`,
-  code:    'NOT_IMPLEMENTED',
-});
+// ─── Etapa 5B ─────────────────────────────────────────────────────────────
 
-exports.linkEntry            = notImpl('5B');
-exports.unlinkEntry          = notImpl('5B');
-exports.ignoreEntry          = notImpl('5B');
-exports.quickCreateFromEntry = notImpl('5C');
+exports.linkEntry = async (req, res) => {
+  try { ok(res, await svc.linkEntry(req.params.id, req.tenantId, req.body)); }
+  catch (e) { err(res, e); }
+};
+
+exports.unlinkEntry = async (req, res) => {
+  try { ok(res, await svc.unlinkEntry(req.params.id, req.tenantId)); }
+  catch (e) { err(res, e); }
+};
+
+exports.ignoreEntry = async (req, res) => {
+  try { ok(res, await svc.ignoreEntry(req.params.id, req.tenantId)); }
+  catch (e) { err(res, e); }
+};
+
+exports.unignoreEntry = async (req, res) => {
+  try { ok(res, await svc.unignoreEntry(req.params.id, req.tenantId)); }
+  catch (e) { err(res, e); }
+};
+
+exports.matchCandidates = async (req, res) => {
+  try { ok(res, await svc.matchCandidates(req.params.id, req.tenantId, req.query)); }
+  catch (e) { err(res, e); }
+};
+
+exports.quickCreateFromEntry = async (req, res) => {
+  try {
+    const result = await svc.quickCreateFromEntry(req.params.id, req.tenantId, req.user.id, req.body);
+    ok(res, result, 201);
+  } catch (e) {
+    err(res, e);
+  }
+};

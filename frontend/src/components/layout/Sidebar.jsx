@@ -3,7 +3,8 @@ import {
   LayoutDashboard, ArrowLeftRight, FileUp, Landmark,
   Tags, GitBranch, Package, BarChart2, FileText,
   Lock, Users, Building2, ChevronDown, LogOut,
-  CreditCard, Wallet, Settings, BookOpen, Truck, UserCircle, Repeat
+  CreditCard, Wallet, Settings, BookOpen, Truck, UserCircle, Repeat,
+  ListChecks
 } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import useRole from '../../hooks/useRole';
@@ -109,6 +110,7 @@ export default function Sidebar() {
             <SidebarLink to="/app/contas-bancarias" icon={Landmark}>Contas Bancárias</SidebarLink>
             <SidebarLink to="/app/extrato" icon={BookOpen}>Extrato Bancário</SidebarLink>
             <SidebarLink to="/app/importacao-ofx" icon={FileUp}>Importar OFX</SidebarLink>
+            <SidebarLink to="/app/conciliacao" icon={ListChecks}>Conciliação</SidebarLink>
           </SidebarSection>
         )}
 

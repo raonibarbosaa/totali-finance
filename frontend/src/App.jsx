@@ -18,6 +18,7 @@ import Extrato from './pages/cliente/Extrato';
 import ContasPagarReceber from './pages/ContasPagarReceber';
 import RecorrenciasFixas from './pages/RecorrenciasFixas';
 import ImportacaoOFX from './pages/ImportacaoOFX';
+import Conciliacao from './pages/Conciliacao';
 import DRE from './pages/DRE';
 import DFC from './pages/DFC';
 import Estoque from './pages/Estoque';
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="recorrencias-fixas" element={<RecorrenciasFixas />} />
           <Route path="extrato" element={<Extrato />} />
           <Route path="importacao-ofx" element={<ImportacaoOFX />} />
+          <Route path="conciliacao" element={<Conciliacao />} />
           <Route path="categorias" element={<Categorias />} />
           <Route path="padroes-ofx" element={<PadroesOFX />} />
           <Route path="contas-bancarias" element={<ContasBancarias />} />
