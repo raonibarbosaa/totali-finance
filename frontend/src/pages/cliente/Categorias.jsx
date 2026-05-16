@@ -15,8 +15,13 @@ const NATUREZAS = [
   { value: 'variavel', label: 'Variável' },
 ];
 
+const SUBTIPOS_DESPESA = [
+  { value: 'operacional', label: 'Operacional', cor: 'bg-red-50 border-red-300 text-red-700' },
+  { value: 'distribuicao_lucros', label: 'Distribuição de Lucros', cor: 'bg-amber-50 border-amber-300 text-amber-700' },
+];
+
 const EMPTY = {
-  nome: '', tipo: 'despesa', natureza: 'variavel',
+  nome: '', tipo: 'despesa', natureza: 'variavel', subtipo: 'operacional',
   contaDebito: '', contaCredito: '', codHistorico: '',
   centroCustoD: '', centroCustoC: '', flagMercadoria: false,
 };
@@ -65,6 +70,7 @@ export default function Categorias() {
         nome: cat.nome,
         tipo: cat.tipo,
         natureza: cat.natureza,
+        subtipo: cat.subtipo || 'operacional',
         contaDebito: cat.contaDebito || '',
         contaCredito: cat.contaCredito || '',
         codHistorico: cat.codHistorico || '',
@@ -104,10 +110,22 @@ export default function Categorias() {
     } catch (_) {}
   }
 
-  const grouped = TIPOS.map(t => ({
-    ...t,
-    items: categorias.filter(c => c.tipo === t.value),
-  })).filter(g => !filtroTipo || g.value === filtroTipo);
+  // Subdivide despesas em "operacional" e "distribuicao_lucros" pra separar
+  // visualmente — distribuição de lucros não é despesa operacional do DRE.
+  const grouped = [
+    { value: 'receita', tipoBase: 'receita', label: 'Receita',
+      cor: 'bg-emerald-100 text-emerald-700',
+      items: categorias.filter(c => c.tipo === 'receita') },
+    { value: 'despesa-operacional', tipoBase: 'despesa', label: 'Despesas Operacionais',
+      cor: 'bg-red-100 text-red-700',
+      items: categorias.filter(c => c.tipo === 'despesa' && (c.subtipo || 'operacional') === 'operacional') },
+    { value: 'despesa-distribuicao', tipoBase: 'despesa', label: 'Distribuição de Lucros',
+      cor: 'bg-amber-100 text-amber-700',
+      items: categorias.filter(c => c.tipo === 'despesa' && c.subtipo === 'distribuicao_lucros') },
+    { value: 'transferencia', tipoBase: 'transferencia', label: 'Transferência',
+      cor: 'bg-blue-100 text-blue-700',
+      items: categorias.filter(c => c.tipo === 'transferencia') },
+  ].filter(g => !filtroTipo || g.tipoBase === filtroTipo);
 
   return (
     <div className="space-y-5">
@@ -302,6 +320,30 @@ export default function Categorias() {
                   </select>
                 </div>
               </div>
+              {form.tipo === 'despesa' && (
+                <div>
+                  <label className="input-label">Classificação</label>
+                  <div className="flex gap-2">
+                    {SUBTIPOS_DESPESA.map(st => (
+                      <button
+                        key={st.value}
+                        type="button"
+                        onClick={() => setForm({ ...form, subtipo: st.value })}
+                        className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                          (form.subtipo || 'operacional') === st.value
+                            ? st.cor
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    "Distribuição de Lucros" não compõe o total de despesas no dashboard nem o DRE como despesa operacional.
+                  </p>
+                </div>
+              )}
               {form.tipo === 'despesa' && (
                 <label className="flex items-start gap-3 p-3 bg-amber-50 border
                                   border-amber-100 rounded-xl cursor-pointer">

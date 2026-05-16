@@ -37,6 +37,7 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
     const [
       receitas,
       despesas,
+      distribuicaoLucros,
       titulos,
       contasComSaldo,
       gruposPorCategoria,
@@ -47,8 +48,25 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
         where: { ...filterMesCorrente, tipo: 'receita' },
         _sum: { valor: true },
       }),
+      // Despesas operacionais (exclui distribuição de lucros / inclui as sem categoria)
       prisma.transaction.aggregate({
-        where: { ...filterMesCorrente, tipo: 'despesa' },
+        where: {
+          ...filterMesCorrente,
+          tipo: 'despesa',
+          OR: [
+            { categoryId: null },
+            { category: { subtipo: 'operacional' } },
+          ],
+        },
+        _sum: { valor: true },
+      }),
+      // Distribuição de Lucros (retiradas de sócios e similares)
+      prisma.transaction.aggregate({
+        where: {
+          ...filterMesCorrente,
+          tipo: 'despesa',
+          category: { subtipo: 'distribuicao_lucros' },
+        },
         _sum: { valor: true },
       }),
       prisma.title.count({
@@ -59,9 +77,23 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
         },
       }),
       bankAccountsService.list(tenantId),
+      // groupBy para "Despesas por categoria" — exclui distribuicao_lucros
+      // pra que os percentuais batam com o KPI "Despesas do mês".
       prisma.transaction.groupBy({
         by: ['tipo', 'categoryId'],
-        where: filterMesCorrente,
+        where: {
+          ...filterMesCorrente,
+          OR: [
+            { tipo: 'receita' },
+            {
+              tipo: 'despesa',
+              OR: [
+                { categoryId: null },
+                { category: { subtipo: 'operacional' } },
+              ],
+            },
+          ],
+        },
         _sum: { valor: true },
       }),
       // ── Alerta de qualidade: lançamentos efetivados sem categoria
@@ -110,6 +142,7 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
       data: {
         receitas: Number(receitas._sum.valor || 0),
         despesas: Number(despesas._sum.valor || 0),
+        distribuicaoLucros: Number(distribuicaoLucros._sum.valor || 0),
         resultado: Number(receitas._sum.valor || 0) - Number(despesas._sum.valor || 0),
         titulosVencer: titulos,
         saldoTotal: saldoDisponivel,

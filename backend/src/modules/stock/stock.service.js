@@ -2,63 +2,59 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function list(tenantId) {
-  return prisma.stock_adjustment.findMany({
-    where: { tenant_id: tenantId },
-    orderBy: { date: 'desc' },
+  return prisma.stockAdjustment.findMany({
+    where: { tenantId },
+    orderBy: { competencia: 'desc' },
     take: 100,
   });
 }
 
 async function getCurrent(tenantId) {
-  const latest = await prisma.stock_adjustment.findFirst({
-    where: { tenant_id: tenantId },
-    orderBy: { date: 'desc' },
+  const latest = await prisma.stockAdjustment.findFirst({
+    where: { tenantId },
+    orderBy: { competencia: 'desc' },
   });
-  // Compras do mês atual ainda não consolidadas em ajuste
+
   const now = new Date();
   const purchases = await prisma.transaction.aggregate({
     where: {
-      tenant_id: tenantId,
-      status: { in: ['PAID', 'RECONCILED'] },
-      date: {
+      tenantId,
+      dataLancamento: {
         gte: new Date(now.getFullYear(), now.getMonth(), 1),
         lte: now,
       },
-      category: { is_merchandise: true },
+      category: { is: { flagMercadoria: true } },
     },
-    _sum: { amount: true },
+    _sum: { valor: true },
   });
 
   return {
-    latest_adjustment: latest || null,
-    latest_value: Number(latest?.value || 0),
-    purchases_this_month: Number(purchases._sum.amount || 0),
+    latestAdjustment:   latest || null,
+    latestValue:        Number(latest?.valorEstoque || 0),
+    purchasesThisMonth: Number(purchases._sum.valor || 0),
   };
 }
 
 async function create(tenantId, userId, data) {
-  const { date, value, notes, month, year } = data;
+  const { date, value, notes } = data;
   if (!date)  throw new Error('Data obrigatória');
   if (value === undefined || value === null) throw new Error('Valor obrigatório');
 
-  const d = new Date(date);
-  return prisma.stock_adjustment.create({
+  return prisma.stockAdjustment.create({
     data: {
-      tenant_id: tenantId,
-      date: d,
-      value: parseFloat(value),
-      notes: notes || null,
-      month: month || d.getMonth() + 1,
-      year:  year  || d.getFullYear(),
-      created_by: userId,
+      tenantId,
+      competencia:  new Date(date),
+      valorEstoque: parseFloat(value),
+      observacao:   notes || null,
+      criadoPor:    userId,
     },
   });
 }
 
 async function remove(id, tenantId) {
-  const record = await prisma.stock_adjustment.findFirst({ where: { id, tenant_id: tenantId } });
+  const record = await prisma.stockAdjustment.findFirst({ where: { id, tenantId } });
   if (!record) throw new Error('Ajuste não encontrado');
-  await prisma.stock_adjustment.delete({ where: { id } });
+  await prisma.stockAdjustment.delete({ where: { id } });
   return { ok: true };
 }
 

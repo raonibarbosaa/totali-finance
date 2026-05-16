@@ -4,16 +4,29 @@ import {
   Tags, GitBranch, Package, BarChart2, FileText,
   Lock, Users, Building2, ChevronDown, LogOut,
   CreditCard, Wallet, Settings, BookOpen, Truck, UserCircle, Repeat,
-  ListChecks
+  ListChecks, X, Cloud
 } from 'lucide-react';
 import useAuthStore from '../../store/authStore';
 import useRole from '../../hooks/useRole';
 import api from '../../services/api';
 
-function SidebarLink({ to, icon: Icon, children }) {
+/* ── Ícone da marca (SVG inline — navy + gold) ─────────────────────── */
+function TotaliIcon({ size = 32 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="22" fill="#1a3353"/>
+      <rect x="44" y="18" width="12" height="64" rx="6" fill="#C4973A"/>
+      <rect x="18" y="44" width="64" height="12" rx="6" fill="#C4973A"/>
+    </svg>
+  );
+}
+
+/* ── Link de navegação ─────────────────────────────────────────────── */
+function SidebarLink({ to, icon: Icon, children, onClick }) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
         `sidebar-link ${isActive ? 'active' : ''}`
       }
@@ -24,6 +37,7 @@ function SidebarLink({ to, icon: Icon, children }) {
   );
 }
 
+/* ── Seção do menu ─────────────────────────────────────────────────── */
 function SidebarSection({ title, children }) {
   return (
     <div className="mb-4">
@@ -35,7 +49,8 @@ function SidebarSection({ title, children }) {
   );
 }
 
-export default function Sidebar() {
+/* ── Sidebar principal ─────────────────────────────────────────────── */
+export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate();
   const { user, tenant, logout } = useAuthStore();
   const { hasRole, isAdminTotal, isAdminTotali } = useRole();
@@ -46,15 +61,28 @@ export default function Sidebar() {
     navigate('/login');
   }
 
-  return (
-    <aside className="w-60 min-h-screen bg-navy-800 flex flex-col flex-shrink-0">
+  // Fecha o sidebar ao clicar num link (mobile)
+  function handleLinkClick() {
+    if (window.innerWidth < 768) onClose();
+  }
 
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-navy-700">
+  return (
+    <aside
+      className={[
+        // Base — mobile: fixed overlay; desktop: relative sempre visível
+        'fixed inset-y-0 left-0 z-50 w-64 flex-shrink-0',
+        'bg-navy-800 flex flex-col',
+        'transition-transform duration-300 ease-in-out',
+        // Mobile: abre/fecha; desktop: sempre visível
+        open ? 'translate-x-0' : '-translate-x-full',
+        'md:relative md:translate-x-0 md:z-auto md:w-60',
+      ].join(' ')}
+    >
+
+      {/* Logo + botão fechar (mobile) */}
+      <div className="px-5 py-5 border-b border-navy-700 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-gold-500 rounded-lg flex items-center justify-center">
-            <span className="text-white font-display font-bold text-sm">T</span>
-          </div>
+          <TotaliIcon size={34} />
           <div>
             <p className="font-display font-semibold text-white text-sm leading-tight">
               TotaliFinance
@@ -62,6 +90,15 @@ export default function Sidebar() {
             <p className="text-[10px] text-navy-400 leading-tight">Totali Contabilidade</p>
           </div>
         </div>
+
+        {/* Botão X — só no mobile */}
+        <button
+          onClick={onClose}
+          className="md:hidden text-navy-400 hover:text-white p-1 rounded transition-colors"
+          aria-label="Fechar menu"
+        >
+          <X size={18} />
+        </button>
       </div>
 
       {/* Empresa ativa */}
@@ -69,7 +106,7 @@ export default function Sidebar() {
         <div
           className="mx-3 mt-3 px-3 py-2 bg-navy-700/50 rounded-lg cursor-pointer
                      hover:bg-navy-700 transition-colors group"
-          onClick={() => navigate('/selecionar-empresa')}
+          onClick={() => { navigate('/selecionar-empresa'); handleLinkClick(); }}
           title="Trocar empresa"
         >
           <p className="text-[10px] text-navy-400 font-medium">Empresa ativa</p>
@@ -87,64 +124,63 @@ export default function Sidebar() {
       <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
 
         <SidebarSection title="Geral">
-          <SidebarLink to="/app/dashboard" icon={LayoutDashboard}>Dashboard</SidebarLink>
+          <SidebarLink to="/app/dashboard" icon={LayoutDashboard} onClick={handleLinkClick}>
+            Dashboard
+          </SidebarLink>
         </SidebarSection>
 
-        {/* Nível 3+ — Financeiro básico */}
         <SidebarSection title="Financeiro">
-          <SidebarLink to="/app/lancamentos" icon={ArrowLeftRight}>Lançamentos</SidebarLink>
-          <SidebarLink to="/app/contas-pagar" icon={CreditCard}>Contas a Pagar</SidebarLink>
-          <SidebarLink to="/app/contas-receber" icon={Wallet}>Contas a Receber</SidebarLink>
-          </SidebarSection>
+          <SidebarLink to="/app/lancamentos" icon={ArrowLeftRight} onClick={handleLinkClick}>Lançamentos</SidebarLink>
+          <SidebarLink to="/app/contas-pagar" icon={CreditCard} onClick={handleLinkClick}>Contas a Pagar</SidebarLink>
+          <SidebarLink to="/app/contas-receber" icon={Wallet} onClick={handleLinkClick}>Contas a Receber</SidebarLink>
+        </SidebarSection>
 
-          <SidebarLink to="/app/recorrencias-fixas?tipo=pagar"   icon={Repeat}>Despesas Fixas</SidebarLink>
-          <SidebarLink to="/app/recorrencias-fixas?tipo=receber" icon={FileText}>Contratos Recorrentes</SidebarLink>
+        <SidebarLink to="/app/recorrencias-fixas?tipo=pagar"   icon={Repeat}    onClick={handleLinkClick}>Despesas Fixas</SidebarLink>
+        <SidebarLink to="/app/recorrencias-fixas?tipo=receber" icon={FileText}  onClick={handleLinkClick}>Contratos Recorrentes</SidebarLink>
 
         <SidebarSection title="Cadastros">
-          <SidebarLink to="/app/fornecedores" icon={Truck}>Fornecedores</SidebarLink>
-          <SidebarLink to="/app/clientes" icon={UserCircle}>Clientes</SidebarLink>
+          <SidebarLink to="/app/fornecedores" icon={Truck}       onClick={handleLinkClick}>Fornecedores</SidebarLink>
+          <SidebarLink to="/app/clientes"     icon={UserCircle}  onClick={handleLinkClick}>Clientes</SidebarLink>
         </SidebarSection>
 
-        {/* Nível 2+ — Bancário */}
         {hasRole(2) && (
           <SidebarSection title="Bancário">
-            <SidebarLink to="/app/contas-bancarias" icon={Landmark}>Contas Bancárias</SidebarLink>
-            <SidebarLink to="/app/extrato" icon={BookOpen}>Extrato Bancário</SidebarLink>
-            <SidebarLink to="/app/importacao-ofx" icon={FileUp}>Importar OFX</SidebarLink>
-            <SidebarLink to="/app/conciliacao" icon={ListChecks}>Conciliação</SidebarLink>
+            <SidebarLink to="/app/contas-bancarias" icon={Landmark}    onClick={handleLinkClick}>Contas Bancárias</SidebarLink>
+            <SidebarLink to="/app/extrato"          icon={BookOpen}    onClick={handleLinkClick}>Extrato Bancário</SidebarLink>
+            <SidebarLink to="/app/importacao-ofx"   icon={FileUp}      onClick={handleLinkClick}>Importar OFX</SidebarLink>
+            <SidebarLink to="/app/integracao-drive" icon={Cloud}       onClick={handleLinkClick}>Drive Automático</SidebarLink>
+            <SidebarLink to="/app/conciliacao"      icon={ListChecks}  onClick={handleLinkClick}>Conciliação</SidebarLink>
           </SidebarSection>
         )}
 
-        {/* Nível 1 — Configurações */}
         {hasRole(1) && (
           <>
             <SidebarSection title="Configurações">
-              <SidebarLink to="/app/categorias" icon={Tags}>Categorias</SidebarLink>
-              <SidebarLink to="/app/padroes-ofx" icon={GitBranch}>Padrões OFX</SidebarLink>
-              <SidebarLink to="/app/configuracao" icon={Settings}>Configuração</SidebarLink>
-              <SidebarLink to="/app/estoque" icon={Package}>Estoque</SidebarLink>
+              <SidebarLink to="/app/categorias"   icon={Tags}     onClick={handleLinkClick}>Categorias</SidebarLink>
+              <SidebarLink to="/app/padroes-ofx"  icon={GitBranch} onClick={handleLinkClick}>Padrões OFX</SidebarLink>
+              <SidebarLink to="/app/configuracao" icon={Settings}  onClick={handleLinkClick}>Configuração</SidebarLink>
+              <SidebarLink to="/app/estoque"      icon={Package}   onClick={handleLinkClick}>Estoque</SidebarLink>
             </SidebarSection>
 
             <SidebarSection title="Relatórios">
-              <SidebarLink to="/app/relatorios/dre" icon={BarChart2}>DRE</SidebarLink>
-              <SidebarLink to="/app/relatorios/dfc" icon={BarChart2}>DFC</SidebarLink>
+              <SidebarLink to="/app/relatorios/dre" icon={BarChart2} onClick={handleLinkClick}>DRE</SidebarLink>
+              <SidebarLink to="/app/relatorios/dfc" icon={BarChart2} onClick={handleLinkClick}>DFC</SidebarLink>
             </SidebarSection>
 
             <SidebarSection title="Escritório">
-              <SidebarLink to="/app/exportacao-dominio" icon={FileText}>Exportar Domínio</SidebarLink>
-              <SidebarLink to="/app/fechamento" icon={Lock}>Fechamento</SidebarLink>
-              <SidebarLink to="/app/usuarios" icon={Users}>Usuários</SidebarLink>
+              <SidebarLink to="/app/exportacao-dominio" icon={FileText} onClick={handleLinkClick}>Exportar Domínio</SidebarLink>
+              <SidebarLink to="/app/fechamento"         icon={Lock}     onClick={handleLinkClick}>Fechamento</SidebarLink>
+              <SidebarLink to="/app/usuarios"           icon={Users}    onClick={handleLinkClick}>Usuários</SidebarLink>
             </SidebarSection>
           </>
         )}
 
-        {/* Admin Totali */}
         {isAdminTotali && (
           <SidebarSection title="Administração">
-            <SidebarLink to="/admin/dashboard" icon={LayoutDashboard}>Painel Totali</SidebarLink>
-            <SidebarLink to="/admin/clientes" icon={Building2}>Clientes</SidebarLink>
+            <SidebarLink to="/admin/dashboard" icon={LayoutDashboard} onClick={handleLinkClick}>Painel Totali</SidebarLink>
+            <SidebarLink to="/admin/clientes"  icon={Building2}       onClick={handleLinkClick}>Clientes</SidebarLink>
             {isAdminTotal && (
-              <SidebarLink to="/admin/usuarios" icon={Users}>Usuários Totali</SidebarLink>
+              <SidebarLink to="/admin/usuarios" icon={Users} onClick={handleLinkClick}>Usuários Totali</SidebarLink>
             )}
           </SidebarSection>
         )}

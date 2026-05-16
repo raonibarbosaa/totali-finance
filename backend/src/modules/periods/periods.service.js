@@ -1,80 +1,60 @@
 const { PrismaClient } = require('@prisma/client');
-const { sendNotification } = require('../notifications/notifications.service');
 const prisma = new PrismaClient();
 
+function competenciaDate(year, month) {
+  return new Date(parseInt(year), parseInt(month) - 1, 1);
+}
+
 async function listPeriods(tenantId) {
-  return prisma.period_closing.findMany({
-    where: { tenant_id: tenantId },
-    orderBy: [{ year: 'desc' }, { month: 'desc' }],
-    include: { closer: { select: { name: true } }, reopener: { select: { name: true } } },
+  return prisma.periodClosing.findMany({
+    where: { tenantId },
+    orderBy: { competencia: 'desc' },
+    include: {
+      fechador: { select: { nome: true } },
+      reabrid:  { select: { nome: true } },
+    },
   });
 }
 
 async function getStatus(tenantId, year, month) {
-  const record = await prisma.period_closing.findFirst({
-    where: { tenant_id: tenantId, year: parseInt(year), month: parseInt(month) },
+  const record = await prisma.periodClosing.findFirst({
+    where: { tenantId, competencia: competenciaDate(year, month) },
   });
-  return { closed: !!record?.closed, record: record || null };
+  return { closed: record?.status === 'fechado', record: record || null };
 }
 
 async function closePeriod(tenantId, userId, { year, month, notes }) {
   if (!year || !month) throw new Error('Ano e mês obrigatórios');
+  const competencia = competenciaDate(year, month);
 
-  const existing = await prisma.period_closing.findFirst({
-    where: { tenant_id: tenantId, year: parseInt(year), month: parseInt(month) },
-  });
-  if (existing?.closed) throw new Error('Período já está fechado');
+  const existing = await prisma.periodClosing.findFirst({ where: { tenantId, competencia } });
+  if (existing?.status === 'fechado') throw new Error('Período já está fechado');
 
-  const record = await prisma.period_closing.upsert({
-    where: { tenant_id_year_month: { tenant_id: tenantId, year: parseInt(year), month: parseInt(month) } },
-    update: { closed: true, closed_at: new Date(), closed_by: userId, notes: notes || null, reopened_at: null, reopened_by: null },
-    create: {
-      tenant_id: tenantId,
-      year: parseInt(year),
-      month: parseInt(month),
-      closed: true,
-      closed_at: new Date(),
-      closed_by: userId,
-      notes: notes || null,
-    },
-  });
-
-  // Notifica o Admin Totali
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-  await sendNotification({
-    type: 'PERIOD_CLOSED',
-    title: `Período fechado — ${tenant?.name}`,
-    message: `${tenant?.name} fechou a competência ${String(month).padStart(2,'0')}/${year}.`,
-    tenant_id: tenantId,
-    target_role: 'ADMIN',
+  const record = await prisma.periodClosing.upsert({
+    where:  { tenantId_competencia: { tenantId, competencia } },
+    update: { status: 'fechado', fechadoEm: new Date(), fechadoPor: userId, reabertoEm: null, reabertoP: null },
+    create: { tenantId, competencia, status: 'fechado', fechadoEm: new Date(), fechadoPor: userId },
   });
 
   return record;
 }
 
 async function reopenPeriod(tenantId, userId, { year, month }) {
-  const record = await prisma.period_closing.findFirst({
-    where: { tenant_id: tenantId, year: parseInt(year), month: parseInt(month) },
-  });
-  if (!record?.closed) throw new Error('Período não está fechado');
+  const competencia = competenciaDate(year, month);
+  const record = await prisma.periodClosing.findFirst({ where: { tenantId, competencia } });
+  if (record?.status !== 'fechado') throw new Error('Período não está fechado');
 
-  return prisma.period_closing.update({
+  return prisma.periodClosing.update({
     where: { id: record.id },
-    data: { closed: false, reopened_at: new Date(), reopened_by: userId },
+    data:  { status: 'aberto', reabertoEm: new Date(), reabertoP: userId },
   });
 }
 
-/**
- * Verifica se uma data está em período fechado para o tenant
- * Usado pelo periodGuard middleware
- */
 async function isPeriodClosed(tenantId, date) {
   const d = new Date(date);
-  const month = d.getMonth() + 1;
-  const year  = d.getFullYear();
-
-  const record = await prisma.period_closing.findFirst({
-    where: { tenant_id: tenantId, year, month, closed: true },
+  const competencia = new Date(d.getFullYear(), d.getMonth(), 1);
+  const record = await prisma.periodClosing.findFirst({
+    where: { tenantId, competencia, status: 'fechado' },
   });
   return !!record;
 }

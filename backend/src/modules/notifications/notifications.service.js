@@ -1,56 +1,40 @@
 // notifications.service.js
 const { PrismaClient } = require('@prisma/client');
-const nodemailer = require('nodemailer');
 const prisma = new PrismaClient();
 
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST,
-  port:   parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
-async function sendNotification({ type, title, message, tenant_id, target_role }) {
-  // Salva no banco
-  await prisma.notification.create({
-    data: { type, title, message, tenant_id, target_role, read: false },
+// Cria notificação (uso interno)
+async function create({ tenantId, tipo, titulo, mensagem, destinatarioId = null }) {
+  return prisma.notification.create({
+    data: { tenantId, tipo, titulo, mensagem, destinatarioId, lida: false },
   });
-
-  // Envia e-mail para admins Totali se configurado
-  if (process.env.SMTP_HOST && process.env.ADMIN_NOTIFY_EMAIL) {
-    try {
-      await transporter.sendMail({
-        from:    process.env.SMTP_FROM || process.env.SMTP_USER,
-        to:      process.env.ADMIN_NOTIFY_EMAIL,
-        subject: `[TotaliFinance] ${title}`,
-        text:    message,
-        html:    `<p>${message}</p><hr><p style="color:#888;font-size:12px">TotaliFinance — notificação automática</p>`,
-      });
-    } catch (e) {
-      console.error('Erro ao enviar e-mail de notificação:', e.message);
-    }
-  }
 }
 
-async function listNotifications(userId, isAdmin) {
+// Lista notificações da empresa ativa (mais recentes primeiro)
+async function listNotifications(tenantId, { unreadOnly = false, limit = 30 } = {}) {
   return prisma.notification.findMany({
-    where: isAdmin
-      ? { read: false }
-      : { target_role: 'CLIENT', read: false },
-    orderBy: { created_at: 'desc' },
-    take: 50,
+    where:   { tenantId, ...(unreadOnly ? { lida: false } : {}) },
+    orderBy: { criadoEm: 'desc' },
+    take:    limit,
   });
 }
 
-async function markRead(id) {
-  return prisma.notification.update({ where: { id }, data: { read: true } });
+// Conta apenas não lidas (pra badge do sininho)
+async function countUnread(tenantId) {
+  return prisma.notification.count({ where: { tenantId, lida: false } });
 }
 
-async function markAllRead() {
-  return prisma.notification.updateMany({ where: { read: false }, data: { read: true } });
+async function markRead(id, tenantId) {
+  return prisma.notification.updateMany({
+    where: { id, tenantId },
+    data:  { lida: true },
+  });
 }
 
-module.exports = { sendNotification, listNotifications, markRead, markAllRead };
+async function markAllRead(tenantId) {
+  return prisma.notification.updateMany({
+    where: { tenantId, lida: false },
+    data:  { lida: true },
+  });
+}
+
+module.exports = { create, listNotifications, countUnread, markRead, markAllRead };

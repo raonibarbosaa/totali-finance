@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, Wallet, AlertCircle, AlertTriangle,
-  ArrowUpRight, ArrowDownRight, Clock, CheckCircle2
+  ArrowUpRight, ArrowDownRight, Clock, CheckCircle2, Users, Activity
 } from 'lucide-react';
 import api from '../../services/api';
 import useAuthStore from '../../store/authStore';
@@ -156,6 +156,7 @@ export default function DashboardCliente() {
         setStats(raw ? {
           receitasMes: raw.receitas || 0,
           despesasMes: raw.despesas || 0,
+          distribuicaoLucros: raw.distribuicaoLucros || 0,
           saldoTotal: raw.saldoTotal || 0,
           titulosAVencer: raw.titulosVencer || 0,
           categorias: raw.categorias || { receitas: [], despesas: [] },
@@ -184,9 +185,9 @@ export default function DashboardCliente() {
 
       {/* Cards de estatísticas — somente nível 1 e 2 */}
       {hasRole(2) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
           {loading ? (
-            Array.from({ length: 4 }).map((_, i) => (
+            Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="card p-5 animate-pulse">
                 <div className="w-10 h-10 bg-slate-100 rounded-xl mb-3" />
                 <div className="h-7 bg-slate-100 rounded w-24 mb-1" />
@@ -207,18 +208,30 @@ export default function DashboardCliente() {
                 icon={TrendingDown}
                 color="bg-red-500"
               />
+              {(() => {
+                const resultado = (stats?.receitasMes || 0) - (stats?.despesasMes || 0);
+                const positivo  = resultado >= 0;
+                return (
+                  <StatCard
+                    label="Resultado do mês"
+                    value={formatCurrency(resultado)}
+                    icon={positivo ? TrendingUp : TrendingDown}
+                    color={positivo ? 'bg-emerald-600' : 'bg-red-600'}
+                    trendLabel="receitas − despesas"
+                  />
+                );
+              })()}
+              <StatCard
+                label="Distribuição de Lucros"
+                value={formatCurrency(stats?.distribuicaoLucros || 0)}
+                icon={Users}
+                color="bg-amber-500"
+              />
               <StatCard
                 label="Saldo disponível"
                 value={formatCurrency(stats?.saldoTotal || 0)}
                 icon={Wallet}
                 color="bg-navy-700"
-              />
-              <StatCard
-                label="Títulos a vencer"
-                value={stats?.titulosAVencer || 0}
-                icon={Clock}
-                color="bg-gold-500"
-                trendLabel="próximos 7 dias"
               />
             </>
           )}

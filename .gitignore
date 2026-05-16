@@ -48,3 +48,8 @@ Resultado*.txt
 *.terminal.txt
 docs/legacy/
 *.bak
+backend/config/google-drive-key.json
+
+# Backups antigos
+*.bak
+*.bak.*

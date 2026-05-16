@@ -36,6 +36,9 @@ model Tenant {
   suppliers         Supplier[]
   customers         Customer[]
 
+  driveConfig       DriveConfig?
+  ofxImportLogs     OfxImportLog[]
+
   @@map("tenants")
 }
 
@@ -513,4 +516,39 @@ model Customer {
   @@index([tenantId, ativo])
   @@index([tenantId, nome])
   @@map("customers")
+}
+
+// ─── Google Drive — Integração de importação automática de OFX ───────────────
+
+model DriveConfig {
+  id            String    @id @default(uuid())
+  tenantId      String    @unique @map("tenant_id")
+  folderId      String    @map("folder_id") @db.VarChar(255)
+  folderUrl     String?   @map("folder_url") @db.Text
+  source        String    @default("totali") @db.VarChar(20) // "totali" ou "client"
+  active        Boolean   @default(true)
+  lastCheckedAt DateTime? @map("last_checked_at")
+  criadoEm      DateTime  @default(now()) @map("criado_em")
+  atualizadoEm  DateTime  @updatedAt @map("atualizado_em")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("drive_configs")
+}
+
+model OfxImportLog {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  driveFileId      String?  @map("drive_file_id") @db.VarChar(255)
+  fileName         String   @map("file_name") @db.VarChar(255)
+  status           String   @db.VarChar(20) // "success" ou "error"
+  transactionCount Int      @default(0) @map("transaction_count")
+  errorMsg         String?  @map("error_msg") @db.Text
+  importedAt       DateTime @default(now()) @map("imported_at")
+  criadoEm         DateTime @default(now()) @map("criado_em")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, importedAt])
+  @@map("ofx_import_logs")
 }

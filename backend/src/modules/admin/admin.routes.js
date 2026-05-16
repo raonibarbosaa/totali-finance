@@ -5,7 +5,7 @@ const ctrl = require('./admin.controller');
 
 // Apenas Admin Total acessa estas rotas
 const adminOnly = (req, res, next) => {
-  if (req.user?.profile !== 'ADMIN_TOTAL' && req.user?.profile !== 'ADMIN_FUNC') {
+  if (req.user?.perfil !== 'admin_total' && req.user?.perfil !== 'admin_func') {
     return res.status(403).json({ success: false, error: 'Acesso restrito ao Admin Totali' });
   }
   next();

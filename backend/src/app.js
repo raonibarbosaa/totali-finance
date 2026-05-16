@@ -95,6 +95,10 @@ app.use('/api/periods', periodsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/admin', adminRoutes);
 
+// ── Google Drive OFX ──────────────────────────────────
+const driveRoutes = require('./modules/drive/drive.routes');
+app.use('/api/drive', driveRoutes);
+
 // ── 404 ───────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'Rota não encontrada.' });
@@ -115,6 +119,16 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ TotaliFinance API rodando na porta ${PORT}`);
   console.log(`   Ambiente: ${process.env.NODE_ENV || 'development'}`);
+
+  // Inicia o poller do Google Drive (a cada 15 minutos)
+  if (process.env.GOOGLE_DRIVE_ENABLED === 'true') {
+    const { startPoller } = require('./modules/drive/drive.poller');
+    startPoller(15);
+  }
+
+  // Scheduler diário de notificações de contas a pagar
+  const { startScheduler } = require('./modules/notifications/bills.scheduler');
+  startScheduler();
 });
 
 module.exports = app;

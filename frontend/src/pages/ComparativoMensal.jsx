@@ -21,8 +21,8 @@ export default function ComparativoMensal() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/reports/monthly', { params: { year } });
-      setData(res.data.data || []);
+      const res = await api.get('/reports/monthly-comparison', { params: { year } });
+      setData(res.data.data?.meses || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

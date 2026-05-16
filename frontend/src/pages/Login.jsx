@@ -50,13 +50,21 @@ export default function Login() {
           <div className="absolute bottom-40 right-40 w-48 h-48 rounded-full border border-white" />
         </div>
         <div className="relative z-10 text-center">
-          <div className="w-20 h-20 bg-gold-500 rounded-2xl flex items-center justify-center
-                          mx-auto mb-8 shadow-xl shadow-gold-500/20">
-            <span className="text-white font-display font-bold text-4xl">T</span>
+          <div className="flex flex-col items-center mb-8">
+            <div className="drop-shadow-2xl mb-5">
+              <svg width="88" height="88" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100" height="100" rx="22" fill="#1e3a5f"/>
+                <rect x="44" y="18" width="12" height="64" rx="6" fill="#C4973A"/>
+                <rect x="18" y="44" width="64" height="12" rx="6" fill="#C4973A"/>
+              </svg>
+            </div>
+            <h1 className="font-display text-4xl mb-2 tracking-tight">
+              <span className="text-white font-bold">totali</span><span style={{color:"#C4973A"}}>·</span><span className="text-navy-300 font-light">finance</span>
+            </h1>
+            <p className="text-xs font-semibold tracking-[0.25em] uppercase" style={{color:"#C4973A"}}>
+              Confiança que soma
+            </p>
           </div>
-          <h1 className="font-display font-bold text-white text-4xl mb-4">
-            TotaliFinance
-          </h1>
           <p className="text-navy-300 text-lg max-w-sm mx-auto">
             Controle financeiro empresarial conectado ao seu escritório contábil
           </p>
