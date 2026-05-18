@@ -722,6 +722,40 @@ function formatDateBR(date) {
   return d.toLocaleDateString('pt-BR');
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Criação em massa de lançamentos a partir de um import (Etapa 5C)
+// ─────────────────────────────────────────────────────────────────────────────
+async function bulkCreateFromImport(importId, tenantId, userId) {
+  const entries = await prisma.ofxEntry.findMany({
+    where:  {
+      ofxImportId:   importId,
+      tenantId,
+      transactionId: null,
+      ignoradoEm:    null,
+    },
+    select: { id: true },
+  });
+
+  if (!entries.length) return { created: 0, errors: 0, errorList: [] };
+
+  let created = 0;
+  let errors  = 0;
+  const errorList = [];
+
+  for (const e of entries) {
+    try {
+      await quickCreateFromEntry(e.id, tenantId, userId, {});
+      created += 1;
+    } catch (err) {
+      errors += 1;
+      errorList.push({ entryId: e.id, message: err.message || 'Erro desconhecido' });
+    }
+  }
+
+  return { created, errors, errorList };
+}
+
 module.exports = {
   // 5A
   importFile,
@@ -735,5 +769,4 @@ module.exports = {
   ignoreEntry,
   unignoreEntry,
   matchCandidates,
-  quickCreateFromEntry,
-};
+  quickCreateFromEntry, bulkCreateFromImport };

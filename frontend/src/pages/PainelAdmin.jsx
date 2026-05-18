@@ -146,7 +146,7 @@ export default function PainelAdmin() {
                 <td className="px-3 py-3 text-gray-500 text-xs">{fmtDateTime(client.last_login)}</td>
                 <td className="px-5 py-3 text-right">
                   <button
-                    onClick={e => { e.stopPropagation(); navigate(`/admin/clientes/${client.id}`); }}
+                    onClick={e => { e.stopPropagation(); navigate(`/admin/clientes/${client.id}`, { state: { client } }); }}
                     className="px-3 py-1.5 text-xs bg-[#152740] text-white rounded-lg hover:bg-[#1e3a5f]">
                     Ver detalhe
                   </button>
@@ -189,7 +189,7 @@ export default function PainelAdmin() {
               <p className="text-sm text-[#152740]">{fmtDate(selected.last_export)}</p>
             </div>
             <button
-              onClick={() => navigate(`/admin/clientes/${selected.id}`)}
+              onClick={() => navigate(`/admin/clientes/${selected.id}`, { state: { client: selected } })}
               className="w-full py-2.5 bg-[#152740] text-white text-sm font-medium rounded-xl hover:bg-[#1e3a5f]">
               Abrir Detalhe Completo →
             </button>

@@ -168,6 +168,8 @@ function TelaConciliacao({ importId, onVoltar }) {
   const [filterStatus, setFilterStatus]   = useState('pendente');
   const [searchTerm, setSearchTerm]       = useState('');
   const [busyEntryId, setBusyEntryId]     = useState(null);
+  const [bulkBusy, setBulkBusy]           = useState(false);
+  const [bulkResult, setBulkResult]       = useState(null);
 
   const [vincularEntry, setVincularEntry]       = useState(null);
   const [quickCreateEntry, setQuickCreateEntry] = useState(null);
@@ -237,6 +239,27 @@ function TelaConciliacao({ importId, onVoltar }) {
     setBusyEntryId(null);
   }
 
+  async function bulkConciliarPendentes() {
+    if (!summary?.pendente) return;
+    const ok = window.confirm(
+      `Criar ${summary.pendente} lançamento(s) a partir das pendências?\n\n` +
+      `Cada entry virará um lançamento conciliado, usando a categoria sugerida (ou "sem categoria"). ` +
+      `Você pode ajustar depois em Lançamentos.`
+    );
+    if (!ok) return;
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const { data: resp } = await api.post(`/ofx/imports/${importId}/bulk-create`);
+      setBulkResult(resp.data);
+      await carregar();
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err.response?.data?.error || 'Erro ao conciliar em massa.');
+    }
+    setBulkBusy(false);
+  }
+
   if (loading && !data) {
     return (
       <div className="space-y-4">
@@ -282,15 +305,50 @@ function TelaConciliacao({ importId, onVoltar }) {
               {imp.importador?.nome && ` por ${imp.importador.nome}`}
             </p>
           </div>
-          <button
-            onClick={carregar}
-            className="text-xs text-slate-500 hover:text-navy-700 flex items-center gap-1"
-            title="Atualizar"
-          >
-            <RefreshCw size={12} /> Atualizar
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {summary?.pendente > 0 && (
+              <button
+                onClick={bulkConciliarPendentes}
+                disabled={bulkBusy}
+                className="px-3 py-1.5 rounded-lg bg-navy-700 hover:bg-navy-800 disabled:opacity-60
+                           text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+                title="Cria lançamentos automaticamente para todas as pendências"
+              >
+                {bulkBusy
+                  ? (<><Loader2 size={12} className="animate-spin"/> Conciliando...</>)
+                  : (<><CheckCircle2 size={12}/> Conciliar todas ({summary.pendente})</>)
+                }
+              </button>
+            )}
+            <button
+              onClick={carregar}
+              className="text-xs text-slate-500 hover:text-navy-700 flex items-center gap-1"
+              title="Atualizar"
+            >
+              <RefreshCw size={12} /> Atualizar
+            </button>
+          </div>
         </div>
       </div>
+
+      {bulkResult && (
+        <div className="card border-emerald-200 bg-emerald-50 px-4 py-3 text-sm flex items-start gap-2">
+          <CheckCircle2 size={16} className="text-emerald-600 mt-0.5"/>
+          <div className="flex-1">
+            <p className="text-emerald-800 font-medium">
+              {bulkResult.created} lançamento(s) criado(s){bulkResult.errors > 0 ? `, ${bulkResult.errors} com erro` : ''}.
+            </p>
+            {bulkResult.errors > 0 && (
+              <p className="text-xs text-emerald-700 mt-0.5">
+                Reveja as pendências que sobraram.
+              </p>
+            )}
+          </div>
+          <button onClick={() => setBulkResult(null)} className="text-emerald-700 hover:text-emerald-900">
+            <X size={14}/>
+          </button>
+        </div>
+      )}
 
       {/* Tabs por status */}
       <div className="card p-1 flex gap-1">

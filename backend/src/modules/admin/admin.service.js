@@ -9,7 +9,7 @@ async function getDashboardData() {
   const tenants = await prisma.tenant.findMany({
     where:   { ativo: true },
     include: {
-      userRoles:     { select: { userId: true } },
+      userRoles:      { select: { userId: true } },
       periodClosings: { orderBy: { competencia: 'desc' }, take: 1 },
     },
     orderBy: { razaoSocial: 'asc' },
@@ -47,29 +47,38 @@ async function getDashboardData() {
       select:  { exportadoEm: true },
     }).catch(() => null);
 
+    // Último login (usa o RefreshToken mais recente de qualquer usuário do tenant)
+    const userIds = tenant.userRoles.map(r => r.userId);
+    const lastLoginRow = userIds.length === 0 ? null : await prisma.refreshToken.findFirst({
+      where:   { userId: { in: userIds } },
+      orderBy: { criadoEm: 'desc' },
+      select:  { criadoEm: true },
+    }).catch(() => null);
+
     const nome = tenant.nomeFantasia || tenant.razaoSocial;
 
     return {
-      id:           tenant.id,
-      name:         nome,
-      cnpj:         tenant.cnpj,
-      ativo:        tenant.ativo,
+      id:            tenant.id,
+      name:          nome,
+      cnpj:          tenant.cnpj,
+      ativo:         tenant.ativo,
       user_count:    tenant.userRoles.length,
       period_closed: currentPeriod?.status === 'fechado',
-      periodMonth:  currentMonth,
-      periodYear:   currentYear,
+      period_month:  currentMonth,
+      period_year:   currentYear,
       overdue_count: overdueCount,
-      ofx_pending: ofxPending,
+      ofx_pending:   ofxPending,
       last_export:   lastExport?.exportadoEm || null,
+      last_login:    lastLoginRow?.criadoEm || null,
     };
   }));
 
   return {
     summary: {
-      totalTenants:  results.length,
-      closedCount:   results.filter(r => r.periodClosed).length,
-      withOverdue:   results.filter(r => r.overdueCount > 0).length,
-      withOFXPending: results.filter(r => r.ofxPending > 0).length,
+      totalTenants:   results.length,
+      closedCount:    results.filter(r => r.period_closed).length,
+      withOverdue:    results.filter(r => r.overdue_count > 0).length,
+      withOFXPending: results.filter(r => r.ofx_pending > 0).length,
     },
     clients: results,
   };
@@ -105,4 +114,28 @@ async function getClientDetail(tenantId) {
   };
 }
 
-module.exports = { getDashboardData, getClientDetail };
+
+async function getOfxPending(tenantId, limit = 50) {
+  const entries = await prisma.ofxEntry.findMany({
+    where:   { tenantId, transactionId: null },
+    orderBy: { dataMovimento: 'desc' },
+    take:    limit,
+    include: { bankAccount: { select: { conta: true } } },
+  });
+  const total = await prisma.ofxEntry.count({
+    where: { tenantId, transactionId: null },
+  });
+  return {
+    total,
+    entries: entries.map(e => ({
+      id:        e.id,
+      data:      e.dataMovimento,
+      valor:     e.valor,
+      tipo:      e.tipo,
+      descricao: e.descricao || e.memo || '—',
+      conta:     e.bankAccount?.conta || '',
+    })),
+  };
+}
+
+module.exports = { getDashboardData, getClientDetail, getOfxPending };

@@ -6,6 +6,7 @@ import SelecionarEmpresa from './pages/SelecionarEmpresa';
 import DashboardCliente from './pages/cliente/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminClientes from './pages/admin/Clientes';
+import AdminClienteDetalhe from './pages/admin/ClienteDetalhe';
 import Fornecedores from './pages/cliente/Fornecedores';
 import Clientes from './pages/cliente/Clientes';
 import AdminUsuarios from './pages/admin/Usuarios';
@@ -64,6 +65,7 @@ export default function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<PainelAdmin />} />
           <Route path="clientes" element={<AdminClientes />} />
+          <Route path="clientes/:id" element={<AdminClienteDetalhe />} />
           <Route path="usuarios" element={<AdminRoute><AdminUsuarios /></AdminRoute>} />
           <Route path="fechamentos" element={<AdminFechamentosPage />} />
         </Route>

@@ -14,6 +14,7 @@ const adminOnly = (req, res, next) => {
 router.use(authenticate, adminOnly);
 
 router.get('/dashboard',   ctrl.dashboard);
-router.get('/clients/:id', ctrl.detail);
+router.get('/clients/:id',             ctrl.detail);
+router.get('/clients/:id/ofx-pending', ctrl.ofxPending);
 
 module.exports = router;

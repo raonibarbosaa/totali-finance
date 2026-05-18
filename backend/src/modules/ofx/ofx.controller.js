@@ -90,3 +90,11 @@ exports.quickCreateFromEntry = async (req, res) => {
     err(res, e);
   }
 };
+exports.bulkCreateFromImport = async (req, res) => {
+  try {
+    const result = await svc.bulkCreateFromImport(req.params.id, req.tenantId, req.user.id);
+    ok(res, result);
+  } catch (e) {
+    err(res, e);
+  }
+};

@@ -41,6 +41,7 @@ router.get   ('/imports/:id',             rGuard([1, 2]),                ctrl.fi
 router.get   ('/imports/:id/entries',     rGuard([1, 2]),                ctrl.listEntries);
 router.post  ('/import',                  rGuard([1, 2]), handleUpload,  ctrl.importFile);
 router.delete('/imports/:id',             rGuard([1]),                   ctrl.removeImport);
+router.post  ('/imports/:id/bulk-create',  rGuard([1, 2]),                ctrl.bulkCreateFromImport);
 
 // ── Ações sobre entries (Etapa 5B) ────────────────────────────────────────
 router.get   ('/entries/:id/match-candidates', rGuard([1, 2]), ctrl.matchCandidates);
