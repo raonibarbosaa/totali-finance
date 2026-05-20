@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import PeriodPresets from '../../components/ui/PeriodPresets';
 import matchSearch from '../../utils/searchMatcher';
 import {
@@ -37,6 +38,7 @@ function mesAtual() {
 }
 
 export default function Lancamentos() {
+  const location = useLocation();
   const { contas }    = useBankAccounts();
   const { categorias }= useCategories();
 
@@ -54,7 +56,7 @@ export default function Lancamentos() {
     dataFim:       periodo.fim,
     tipo:          '',
     bankAccountId: '',
-    categoryId:    '',
+    categoryId:    new URLSearchParams(location.search).get('categoryId') || '',
     search:        '',
   });
 
@@ -220,6 +222,7 @@ export default function Lancamentos() {
               <select className="input-field text-xs" value={filtros.categoryId}
                 onChange={e => setFiltros({ ...filtros, categoryId: e.target.value })}>
                 <option value="">Todas</option>
+                <option value="__sem__">Sem categoria</option>
                 {categorias.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
             </div>

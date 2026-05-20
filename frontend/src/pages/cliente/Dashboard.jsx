@@ -104,7 +104,7 @@ function SemCategoriaAlert({ data }) {
             <p className="text-sm font-semibold text-amber-900">
               {count} lançamento{count > 1 ? 's' : ''} sem categoria neste mês
             </p>
-            <a href="/app/lancamentos"
+            <a href="/app/lancamentos?categoryId=__sem__"
               className="text-xs font-medium text-amber-700 hover:text-amber-900 whitespace-nowrap flex-shrink-0">
               Ver todos →
             </a>
