@@ -32,6 +32,7 @@ services:
       JWT_EXPIRES_IN: 24h
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-troque_esta_chave_tambem}
       REFRESH_TOKEN_EXPIRES_IN: 30d
+      RESET_TOKEN_EXPIRES_MIN: ${RESET_TOKEN_EXPIRES_MIN:-60}
       PORT: 3000
       NODE_ENV: production
       FRONTEND_URL: ${FRONTEND_URL:-https://app.totalicontabilidade.com.br}

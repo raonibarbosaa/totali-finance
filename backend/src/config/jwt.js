@@ -5,6 +5,7 @@ const ACCESS_SECRET = process.env.JWT_SECRET;
 const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET;
 const ACCESS_EXPIRES = process.env.JWT_EXPIRES_IN || '15m';
 const REFRESH_EXPIRES = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+const RESET_EXPIRES_MIN = parseInt(process.env.RESET_TOKEN_EXPIRES_MIN) || 60;
 
 /**
  * Gera access token JWT com payload do usuário + empresa selecionada
@@ -35,6 +36,27 @@ function verifyAccessToken(token) {
 }
 
 /**
+ * Gera token opaco para redefinição de senha (enviado por e-mail)
+ */
+function generateResetToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * Hash do token de redefinição para armazenar no banco
+ */
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Data de expiração do token de redefinição (padrão: 60 minutos)
+ */
+function resetTokenExpiry(minutos = RESET_EXPIRES_MIN) {
+  return new Date(Date.now() + minutos * 60 * 1000);
+}
+
+/**
  * Data de expiração do refresh token
  */
 function refreshTokenExpiry() {
@@ -50,4 +72,8 @@ module.exports = {
   hashRefreshToken,
   verifyAccessToken,
   refreshTokenExpiry,
+  generateResetToken,
+  hashResetToken,
+  resetTokenExpiry,
+  RESET_EXPIRES_MIN,
 };

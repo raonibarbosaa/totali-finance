@@ -107,4 +107,81 @@ async function me(req, res) {
   });
 }
 
-module.exports = { login, selecionarEmpresa, refresh, logout, me };
+/**
+ * POST /api/auth/esqueci-senha
+ * Resposta sempre genérica — não revela se o e-mail está cadastrado.
+ */
+async function esqueciSenha(req, res) {
+  try {
+    const { email } = req.body;
+    if (!email || !String(email).includes('@')) {
+      return res.status(400).json({ success: false, error: 'Informe um e-mail válido.' });
+    }
+
+    await authService.solicitarResetSenha(email);
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Se este e-mail estiver cadastrado, você receberá o link de redefinição em instantes.',
+      },
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: err.message });
+  }
+}
+
+/**
+ * GET /api/auth/redefinir-senha/:token — valida o link antes de exibir o formulário
+ */
+async function validarTokenReset(req, res) {
+  try {
+    const data = await authService.validarTokenReset(req.params.token);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(err.status || 400).json({ success: false, error: err.message });
+  }
+}
+
+/**
+ * POST /api/auth/redefinir-senha
+ */
+async function redefinirSenha(req, res) {
+  try {
+    const { token, senha, confirmacao } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ success: false, error: 'Link inválido.' });
+    }
+    if (!senha) {
+      return res.status(400).json({ success: false, error: 'Informe a nova senha.' });
+    }
+    if (confirmacao !== undefined && senha !== confirmacao) {
+      return res.status(400).json({ success: false, error: 'As senhas não conferem.' });
+    }
+
+    await authService.redefinirSenha(token, senha);
+
+    // Qualquer sessão anterior foi invalidada — limpa os cookies deste navegador
+    res.clearCookie('refreshToken');
+    res.clearCookie('userId');
+
+    res.json({
+      success: true,
+      data: { message: 'Senha redefinida com sucesso. Faça login com a nova senha.' },
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: err.message });
+  }
+}
+
+module.exports = {
+  login,
+  selecionarEmpresa,
+  refresh,
+  logout,
+  me,
+  esqueciSenha,
+  validarTokenReset,
+  redefinirSenha,
+};

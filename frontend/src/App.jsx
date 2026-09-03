@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PrivateRoute, AdminRoute } from './routes/PrivateRoute';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
+import EsqueciSenha from './pages/EsqueciSenha';
+import RedefinirSenha from './pages/RedefinirSenha';
 import SelecionarEmpresa from './pages/SelecionarEmpresa';
 import DashboardCliente from './pages/cliente/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';
@@ -35,6 +37,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/esqueci-senha" element={<EsqueciSenha />} />
+        <Route path="/redefinir-senha" element={<RedefinirSenha />} />
         <Route path="/selecionar-empresa" element={<PrivateRoute requireTenant={false}><SelecionarEmpresa /></PrivateRoute>} />
         <Route path="/app" element={<PrivateRoute requireTenant={true}><Layout /></PrivateRoute>}>
           <Route index element={<Navigate to="dashboard" replace />} />

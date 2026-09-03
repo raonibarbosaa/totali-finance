@@ -54,6 +54,7 @@ model User {
 
   tenantRoles        UserTenantRole[]
   refreshTokens      RefreshToken[]
+  passwordResets     PasswordResetToken[]
   transactionsCriadas Transaction[] @relation("TransacaoCriadaPor")
   titlesCriados       Title[]       @relation("TituloCriadoPor")
   recurringCriados    RecurringTitle[] @relation("RecurringCriadoPor")
@@ -95,6 +96,20 @@ model RefreshToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiraEm  DateTime  @map("expira_em")
+  usadoEm   DateTime? @map("usado_em")
+  criadoEm  DateTime  @default(now()) @map("criado_em")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model BankAccount {

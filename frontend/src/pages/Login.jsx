@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import api from '../services/api';
 import useAuthStore from '../store/authStore';
@@ -140,6 +140,14 @@ export default function Login() {
                 >
                   {showSenha ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
+              </div>
+              <div className="text-right mt-1.5">
+                <Link
+                  to="/esqueci-senha"
+                  className="text-xs text-navy-600 hover:text-navy-800 hover:underline"
+                >
+                  Esqueci minha senha
+                </Link>
               </div>
             </div>
 

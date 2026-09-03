@@ -13,7 +13,7 @@ async function main() {
       nome: 'Admin Totali',
       email: 'admin@totalicontabilidade.com.br',
       senhaHash: hash,
-      perfil: 'ADMIN_TOTAL',
+      perfil: 'admin_total',
       ativo: true,
     },
   });

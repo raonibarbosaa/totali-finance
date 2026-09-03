@@ -6,7 +6,12 @@ const {
   hashRefreshToken,
   verifyAccessToken,
   refreshTokenExpiry,
+  generateResetToken,
+  hashResetToken,
+  resetTokenExpiry,
+  RESET_EXPIRES_MIN,
 } = require('../../config/jwt');
+const { enviarResetSenha } = require('../../config/mailer');
 
 /**
  * Login: valida credenciais e retorna lista de empresas vinculadas
@@ -167,10 +172,137 @@ async function logout(userId, refreshTokenRaw) {
 }
 
 /**
+ * Valida a força mínima da senha
+ */
+function validarSenha(senha) {
+  if (!senha || senha.length < 8) {
+    throw { status: 400, message: 'A senha deve ter no mínimo 8 caracteres.' };
+  }
+  if (!/[A-Za-z]/.test(senha) || !/[0-9]/.test(senha)) {
+    throw { status: 400, message: 'A senha deve conter letras e números.' };
+  }
+}
+
+/**
+ * Esqueci minha senha: gera token de uso único e envia o link por e-mail.
+ *
+ * Nunca revela se o e-mail existe (evita enumeração de usuários) — o
+ * controller sempre responde com a mesma mensagem genérica.
+ */
+async function solicitarResetSenha(email) {
+  const user = await prisma.user.findUnique({
+    where: { email: String(email).toLowerCase().trim() },
+  });
+
+  if (!user || !user.ativo) {
+    console.warn('[RESET] Pedido de redefinição para e-mail inexistente/inativo:', email);
+    return;
+  }
+
+  // Invalida pedidos anteriores ainda pendentes
+  await prisma.passwordResetToken.deleteMany({
+    where: { userId: user.id, usadoEm: null },
+  });
+
+  const token = generateResetToken();
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash: hashResetToken(token),
+      expiraEm: resetTokenExpiry(),
+    },
+  });
+
+  const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+  const link = `${baseUrl}/redefinir-senha?token=${token}`;
+
+  try {
+    await enviarResetSenha({
+      to: user.email,
+      nome: user.nome,
+      link,
+      minutos: RESET_EXPIRES_MIN,
+    });
+  } catch (err) {
+    console.error('[RESET] Falha ao enviar e-mail de redefinição:', err.message);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[RESET] Link (fallback dev):', link);
+    }
+    throw { status: 502, message: 'Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos.' };
+  }
+}
+
+/**
+ * Busca um token de redefinição válido (não usado e não expirado)
+ */
+async function buscarTokenReset(tokenRaw) {
+  if (!tokenRaw) {
+    throw { status: 400, message: 'Link inválido.' };
+  }
+
+  const registro = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashResetToken(tokenRaw) },
+    include: { user: true },
+  });
+
+  if (!registro || registro.usadoEm || registro.expiraEm < new Date()) {
+    throw { status: 400, message: 'Link inválido ou expirado. Solicite uma nova redefinição.' };
+  }
+  if (!registro.user.ativo) {
+    throw { status: 403, message: 'Usuário inativo. Fale com o escritório.' };
+  }
+
+  return registro;
+}
+
+/**
+ * Valida o token do link (usado pela tela antes de mostrar o formulário)
+ */
+async function validarTokenReset(tokenRaw) {
+  const registro = await buscarTokenReset(tokenRaw);
+  return { nome: registro.user.nome, email: registro.user.email };
+}
+
+/**
+ * Redefine a senha, consome o token e derruba as sessões abertas
+ */
+async function redefinirSenha(tokenRaw, novaSenha) {
+  validarSenha(novaSenha);
+
+  const registro = await buscarTokenReset(tokenRaw);
+  const senhaHash = await bcrypt.hash(novaSenha, 12);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: registro.userId },
+      data: { senhaHash },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: registro.id },
+      data: { usadoEm: new Date() },
+    }),
+    // Invalida qualquer sessão aberta com a senha antiga
+    prisma.refreshToken.deleteMany({ where: { userId: registro.userId } }),
+  ]);
+
+  return { email: registro.user.email };
+}
+
+/**
  * Hash de senha para cadastro
  */
 async function hashSenha(senha) {
   return bcrypt.hash(senha, 12);
 }
 
-module.exports = { login, selecionarEmpresa, refresh, logout, hashSenha };
+module.exports = {
+  login,
+  selecionarEmpresa,
+  refresh,
+  logout,
+  hashSenha,
+  solicitarResetSenha,
+  validarTokenReset,
+  redefinirSenha,
+};
