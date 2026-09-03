@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ChevronRight, Search, LogOut, ShieldCheck } from 'lucide-react';
 import api from '../services/api';
@@ -11,10 +11,21 @@ export default function SelecionarEmpresa() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(null); // id da empresa sendo selecionada
   const [erro, setErro] = useState('');
+  const [autoEntrando, setAutoEntrando] = useState(false);
+  const jaAutoSelecionou = useRef(false);
 
   useEffect(() => {
     if (!user) navigate('/login');
   }, [user]);
+
+  // Empresa única: entra direto, sem obrigar um clique numa tela de uma opção só.
+  // O ref garante que isso rode uma vez — se a seleção falhar, cai na lista.
+  useEffect(() => {
+    if (jaAutoSelecionou.current || empresas.length !== 1) return;
+    jaAutoSelecionou.current = true;
+    setAutoEntrando(true);
+    selecionarEmpresa(empresas[0]).finally(() => setAutoEntrando(false));
+  }, [empresas]);
 
   const empresasFiltradas = empresas.filter((e) => {
     const q = search.toLowerCase();
@@ -61,6 +72,21 @@ export default function SelecionarEmpresa() {
   function handleLogout() {
     logout();
     navigate('/login');
+  }
+
+  // Enquanto entra sozinho na empresa única, mostra um aguarde em vez de
+  // piscar uma lista com um item só na tela.
+  if (autoEntrando && !erro) {
+    const unica = empresas[0];
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
+        <span className="w-7 h-7 border-2 border-navy-200 border-t-navy-800
+                         rounded-full animate-spin" />
+        <p className="text-sm text-slate-500">
+          Entrando em {unica?.nomeFantasia || unica?.razaoSocial}...
+        </p>
+      </div>
+    );
   }
 
   return (

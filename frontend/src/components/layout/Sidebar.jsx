@@ -200,7 +200,7 @@ function SidebarSection({ id, titulo, aberta, onToggle, children }) {
 export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { user, tenant, logout } = useAuthStore();
+  const { user, tenant, empresas, logout } = useAuthStore();
   const permissoes = useRole();
 
   // Primeiro acesso: abre só o grupo da página atual.
@@ -244,6 +244,9 @@ export default function Sidebar({ open, onClose }) {
     if (window.innerWidth < 768) onClose();
   }
 
+  // Com uma empresa só não há o que trocar — o bloco vira apenas informativo.
+  const podeTrocarEmpresa = (empresas?.length || 0) > 1;
+
   const secoesVisiveis = SECOES.filter(s => !s.visivel || s.visivel(permissoes));
 
   return (
@@ -281,23 +284,32 @@ export default function Sidebar({ open, onClose }) {
         </button>
       </div>
 
-      {/* Empresa ativa */}
+      {/* Empresa ativa — só vira botão de troca quando há mais de uma */}
       {tenant && (
-        <div
-          className="mx-3 mt-3 px-3 py-2 bg-navy-700/50 rounded-lg cursor-pointer
-                     hover:bg-navy-700 transition-colors group"
-          onClick={() => { navigate(user?.acesso === 'total' ? '/admin/dashboard' : '/selecionar-empresa'); handleLinkClick(); }}
-          title="Trocar empresa"
-        >
-          <p className="text-[10px] text-navy-400 font-medium">Empresa ativa</p>
-          <p className="text-xs text-white font-medium truncate mt-0.5">
-            {tenant.nomeFantasia || tenant.razaoSocial}
-          </p>
-          <p className="text-[10px] text-navy-400 mt-0.5 flex items-center gap-1
-                        group-hover:text-navy-300 transition-colors">
-            Trocar <ChevronDown size={10} />
-          </p>
-        </div>
+        podeTrocarEmpresa ? (
+          <div
+            className="mx-3 mt-3 px-3 py-2 bg-navy-700/50 rounded-lg cursor-pointer
+                       hover:bg-navy-700 transition-colors group"
+            onClick={() => { navigate(user?.acesso === 'total' ? '/admin/dashboard' : '/selecionar-empresa'); handleLinkClick(); }}
+            title="Trocar empresa"
+          >
+            <p className="text-[10px] text-navy-400 font-medium">Empresa ativa</p>
+            <p className="text-xs text-white font-medium truncate mt-0.5">
+              {tenant.nomeFantasia || tenant.razaoSocial}
+            </p>
+            <p className="text-[10px] text-navy-400 mt-0.5 flex items-center gap-1
+                          group-hover:text-navy-300 transition-colors">
+              Trocar <ChevronDown size={10} />
+            </p>
+          </div>
+        ) : (
+          <div className="mx-3 mt-3 px-3 py-2 bg-navy-700/50 rounded-lg">
+            <p className="text-[10px] text-navy-400 font-medium">Empresa ativa</p>
+            <p className="text-xs text-white font-medium truncate mt-0.5">
+              {tenant.nomeFantasia || tenant.razaoSocial}
+            </p>
+          </div>
+        )
       )}
 
       {/* Navegação */}

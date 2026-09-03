@@ -49,7 +49,9 @@ const useAuthStore = create(
         tenant: state.tenant,
         role: state.role,
         accessToken: state.accessToken,
-        // empresas NÃO é persistida
+        // Guardada para sobreviver ao F5: sem ela o menu não sabe se o
+        // usuário tem mais de uma empresa (e a tela de seleção fica vazia).
+        empresas: state.empresas,
       }),
     }
   )
