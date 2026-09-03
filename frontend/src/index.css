@@ -95,6 +95,14 @@
   .sidebar-link.active {
     @apply text-white bg-navy-700/70;
   }
+
+  /* Título do grupo — botão que abre/fecha a seção */
+  .sidebar-section-title {
+    @apply w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg
+           text-[10px] font-semibold uppercase tracking-widest
+           text-navy-400 hover:text-navy-200 hover:bg-navy-700/40
+           transition-colors duration-150 cursor-pointer select-none;
+  }
 }
 
 /* Scrollbar customizada */
