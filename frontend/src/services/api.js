@@ -46,6 +46,10 @@ api.interceptors.response.use(
     if (status === 401 && !isAuthEndpoint(url) && !isRedirecting) {
       isRedirecting = true;
 
+      // Mostra o motivo real quando o servidor informa (ex.: acesso bloqueado
+      // pelo admin) — 'sessão expirada' confundiria quem acabou de ser bloqueado.
+      const motivo = error.response?.data?.error || 'Sessão expirada. Faça login novamente.';
+
       try {
         useAuthStore.getState().logout();
       } catch (_) {
@@ -57,7 +61,7 @@ api.interceptors.response.use(
       setTimeout(() => {
         try {
           // eslint-disable-next-line no-alert
-          alert('Sessão expirada. Faça login novamente.');
+          alert(motivo);
         } finally {
           window.location.href = '/login';
         }

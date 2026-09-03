@@ -1,11 +1,31 @@
 const service = require('./users.service');
 
+const PERFIS_TOTALI = ['admin_total', 'admin_funcionario'];
+
+/** Quem está pedindo: usuário do token + vínculo ativo (nível e empresa) */
+function solicitante(req) {
+  return {
+    id: req.user.id,
+    perfil: req.user.perfil,
+    role: req.role,
+    tenantId: req.tenantId,
+  };
+}
+
 async function listar(req, res) {
   try {
-    const { page, limit } = req.query;
-    const tenantId = req.tenantId || null;
+    const { page, limit, escopo } = req.query;
+
+    // 'equipe' ignora a empresa selecionada e lista o time da Totali.
+    // Sem isso o tenantId do JWT sempre vencia, e a tela de Usuários Totali
+    // acabava mostrando os usuários da empresa ativa.
+    if (escopo === 'equipe' && !PERFIS_TOTALI.includes(req.user.perfil)) {
+      return res.status(403).json({ success: false, error: 'Acesso restrito à equipe Totali.' });
+    }
+
     const result = await service.listarUsuarios({
-      tenantId,
+      tenantId: req.tenantId || null,
+      escopo,
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 50,
     });
@@ -17,6 +37,7 @@ async function listar(req, res) {
 
 async function buscar(req, res) {
   try {
+    await service.podeGerenciarUsuario(solicitante(req), req.params.id, { permitirProprio: true });
     const user = await service.buscarPorId(req.params.id);
     res.json({ success: true, data: user });
   } catch (err) {
@@ -49,6 +70,16 @@ async function criar(req, res) {
     });
     res.status(201).json({ success: true, data: user });
   } catch (err) {
+    // E-mail repetido: para o admin_total devolvemos quem é a pessoa, para ele
+    // poder dar acesso a mais uma empresa sem sair da tela. Para os demais fica
+    // só a mensagem — revelar o dono do e-mail vazaria dado entre clientes.
+    if (err.status === 409 && err.usuarioExistente && req.user.perfil === 'admin_total') {
+      return res.status(409).json({
+        success: false,
+        error: err.message,
+        usuarioExistente: err.usuarioExistente,
+      });
+    }
     res.status(err.status || 500).json({ success: false, error: err.message });
   }
 }
@@ -56,6 +87,7 @@ async function criar(req, res) {
 async function atualizar(req, res) {
   try {
     const { nome, email, ativo } = req.body;
+    await service.podeGerenciarUsuario(solicitante(req), req.params.id);
     const user = await service.atualizar(req.params.id, { nome, email, ativo });
     res.json({ success: true, data: user });
   } catch (err) {
@@ -113,6 +145,7 @@ async function desvincular(req, res) {
 
 async function listarVinculos(req, res) {
   try {
+    await service.podeGerenciarUsuario(solicitante(req), req.params.id, { permitirProprio: true });
     const vinculos = await service.listarVinculos(req.params.id);
     res.json({ success: true, data: vinculos });
   } catch (err) {

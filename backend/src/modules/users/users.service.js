@@ -1,14 +1,22 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../config/database');
 
-async function listarUsuarios({ tenantId, perfil, page = 1, limit = 50 }) {
+const SELECT_USUARIO = {
+  id: true, nome: true, email: true, perfil: true, ativo: true, criadoEm: true,
+  tenantRoles: {
+    include: { tenant: { select: { id: true, razaoSocial: true, nomeFantasia: true } } },
+  },
+};
+
+/**
+ * escopo 'equipe'  → usuários da Totali, independente da empresa selecionada
+ * escopo padrão    → usuários vinculados a uma empresa
+ */
+async function listarUsuarios({ tenantId, escopo, page = 1, limit = 50 }) {
   const skip = (page - 1) * limit;
 
-  // Admin total vê todos os usuários Totali
-  if (!tenantId) {
-    const where = perfil
-      ? { perfil: { in: ['admin_total', 'admin_funcionario'] } }
-      : { perfil: { in: ['admin_total', 'admin_funcionario'] } };
+  if (escopo === 'equipe') {
+    const where = { perfil: { in: ['admin_total', 'admin_funcionario'] } };
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({
@@ -16,32 +24,71 @@ async function listarUsuarios({ tenantId, perfil, page = 1, limit = 50 }) {
         skip,
         take: limit,
         orderBy: { nome: 'asc' },
-        select: {
-          id: true, nome: true, email: true, perfil: true, ativo: true, criadoEm: true,
-          tenantRoles: { include: { tenant: { select: { id: true, razaoSocial: true } } } },
-        },
+        select: SELECT_USUARIO,
       }),
       prisma.user.count({ where }),
     ]);
     return { users, total, page, limit };
   }
 
-  // Usuários de uma empresa específica
-  const vinculos = await prisma.userTenantRole.findMany({
-    where: { tenantId },
-    include: {
-      user: { select: { id: true, nome: true, email: true, perfil: true, ativo: true } },
-    },
-    skip,
-    take: limit,
-  });
+  if (!tenantId) {
+    throw { status: 400, message: 'Empresa não informada.' };
+  }
+
+  const [vinculos, total] = await Promise.all([
+    prisma.userTenantRole.findMany({
+      where: { tenantId },
+      include: { user: { select: SELECT_USUARIO } },
+      skip,
+      take: limit,
+    }),
+    prisma.userTenantRole.count({ where: { tenantId } }),
+  ]);
 
   return {
     users: vinculos.map(v => ({ ...v.user, role: v.role, vinculoId: v.id })),
-    total: vinculos.length,
+    total,
     page,
     limit,
   };
+}
+
+/**
+ * Quem pode mexer no cadastro de quem.
+ * - admin_total: qualquer usuário
+ * - gerente (role 1): só usuários 'cliente' vinculados à própria empresa
+ * `permitirProprio` libera o próprio usuário — vale para leitura, nunca para
+ * bloqueio (ninguém deve conseguir se trancar para fora).
+ */
+async function podeGerenciarUsuario(solicitante, alvoId, { permitirProprio = false } = {}) {
+  if (solicitante.id === alvoId && !permitirProprio) {
+    throw { status: 403, message: 'Você não pode alterar o seu próprio acesso.' };
+  }
+
+  const alvo = await prisma.user.findUnique({
+    where: { id: alvoId },
+    select: { id: true, nome: true, perfil: true, ativo: true },
+  });
+  if (!alvo) throw { status: 404, message: 'Usuário não encontrado.' };
+
+  if (solicitante.perfil === 'admin_total') return alvo;
+
+  if (solicitante.id === alvoId) return alvo;
+
+  if (solicitante.role === 1 && solicitante.tenantId) {
+    if (alvo.perfil !== 'cliente') {
+      throw { status: 403, message: 'Você não tem permissão sobre este usuário.' };
+    }
+    const vinculo = await prisma.userTenantRole.findUnique({
+      where: { userId_tenantId: { userId: alvoId, tenantId: solicitante.tenantId } },
+    });
+    if (!vinculo) {
+      throw { status: 403, message: 'Este usuário não pertence à sua empresa.' };
+    }
+    return alvo;
+  }
+
+  throw { status: 403, message: 'Você não tem permissão para esta ação.' };
 }
 
 async function buscarPorId(id) {
@@ -59,8 +106,19 @@ async function buscarPorId(id) {
 }
 
 async function criar({ nome, email, senha, perfil, tenantId, role, criadoPorId }) {
-  const emailExists = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
-  if (emailExists) throw { status: 409, message: 'E-mail já cadastrado.' };
+  const emailExists = await prisma.user.findUnique({
+    where: { email: email.toLowerCase().trim() },
+    select: SELECT_USUARIO,
+  });
+  if (emailExists) {
+    // Leva junto quem é a pessoa: o controller decide se pode revelar isso a
+    // quem pediu (só admin_total vê — para os demais seria vazamento entre clientes).
+    throw {
+      status: 409,
+      message: 'E-mail já cadastrado.',
+      usuarioExistente: emailExists,
+    };
+  }
 
   const senhaHash = await bcrypt.hash(senha, 12);
 
@@ -94,11 +152,20 @@ async function atualizar(id, { nome, email, ativo }) {
     if (emailExists) throw { status: 409, message: 'E-mail já em uso por outro usuário.' };
   }
 
-  return prisma.user.update({
+  const atualizado = await prisma.user.update({
     where: { id },
     data: { nome, email: email?.toLowerCase().trim(), ativo },
     select: { id: true, nome: true, email: true, perfil: true, ativo: true },
   });
+
+  // Bloqueou: apaga os refresh tokens para ele não conseguir voltar.
+  // O access token que ele ainda tem em mãos morre na próxima requisição,
+  // porque o middleware de autenticação confere `ativo` no banco.
+  if (ativo === false) {
+    await prisma.refreshToken.deleteMany({ where: { userId: id } });
+  }
+
+  return atualizado;
 }
 
 async function trocarSenha(id, senhaAtual, novaSenha) {
@@ -145,6 +212,7 @@ async function listarVinculos(userId) {
 
 module.exports = {
   listarUsuarios,
+  podeGerenciarUsuario,
   buscarPorId,
   criar,
   atualizar,
