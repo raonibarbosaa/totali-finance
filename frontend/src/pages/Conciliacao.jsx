@@ -4,7 +4,7 @@ import {
   ListChecks, ArrowLeft, ChevronRight, Search,
   CheckCircle2, Clock, MinusCircle, Building2, Calendar,
   Link2, Plus, X, Loader2, AlertTriangle, FileText,
-  TrendingUp, TrendingDown, RefreshCw, Tag
+  TrendingUp, TrendingDown, RefreshCw, Tag, SlidersHorizontal
 } from 'lucide-react';
 import api from '../services/api';
 import Modal from '../components/ui/Modal';
@@ -34,6 +34,19 @@ const STATUS_COR = {
   conciliado: { bg: 'bg-emerald-50',  border: 'border-emerald-200',text: 'text-emerald-700',badge: 'bg-emerald-100 text-emerald-700' },
   ignorado:   { bg: 'bg-slate-50',    border: 'border-slate-200',  text: 'text-slate-500',  badge: 'bg-slate-100 text-slate-600' },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Padrões OFX: match local (mesma regra do backend aplicarSugestoesCategoria)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function encontrarPadrao(entry, padroes) {
+  if (!padroes || !padroes.length) return null;
+  const texto = `${entry.descricao || ''} ${entry.memo || ''}`.toUpperCase();
+  if (!texto.trim()) return null;
+  return padroes.find(
+    (p) => p.textoHistorico && texto.includes(p.textoHistorico.toUpperCase())
+  ) || null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Componente principal — roteador entre lista e tela de conciliação
@@ -174,6 +187,8 @@ function TelaConciliacao({ importId, onVoltar }) {
   const [vincularEntry, setVincularEntry]       = useState(null);
   const [quickCreateEntry, setQuickCreateEntry] = useState(null);
   const [unlinkConfirm, setUnlinkConfirm]       = useState(null);
+  const [patternEntry, setPatternEntry]         = useState(null);
+  const [padroes, setPadroes]                   = useState([]);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -190,6 +205,15 @@ function TelaConciliacao({ importId, onVoltar }) {
   }, [importId, filterStatus]);
 
   useEffect(() => { carregar(); }, [carregar]);
+
+  const carregarPadroes = useCallback(async () => {
+    try {
+      const { data: resp } = await api.get('/ofx-patterns');
+      setPadroes(resp.data || resp.data?.data || []);
+    } catch (_) { /* sem padrões ou sem permissão: ignora */ }
+  }, []);
+
+  useEffect(() => { carregarPadroes(); }, [carregarPadroes]);
 
   const entriesFiltradas = useMemo(() => {
     if (!data?.entries) return [];
@@ -424,6 +448,8 @@ function TelaConciliacao({ importId, onVoltar }) {
               onIgnorar={() => ignorar(entry)}
               onDesfazerIgnorar={() => desfazerIgnorar(entry)}
               onDesvincular={() => setUnlinkConfirm(entry)}
+              padroes={padroes}
+              onPadrao={() => setPatternEntry(entry)}
             />
           ))}
         </div>
@@ -441,8 +467,22 @@ function TelaConciliacao({ importId, onVoltar }) {
       {quickCreateEntry && (
         <QuickCreateModal
           entry={quickCreateEntry}
+          padroes={padroes}
           onClose={() => setQuickCreateEntry(null)}
           onCreated={() => { setQuickCreateEntry(null); carregar(); }}
+        />
+      )}
+
+      {patternEntry && (
+        <PatternModal
+          entry={patternEntry}
+          padroes={padroes}
+          onClose={() => setPatternEntry(null)}
+          onSaved={() => {
+            setPatternEntry(null);
+            carregarPadroes();
+            carregar();
+          }}
         />
       )}
 
@@ -478,7 +518,8 @@ function TelaConciliacao({ importId, onVoltar }) {
 // Card de uma entry — variações por status
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgnorar, onDesvincular }) {
+function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgnorar, onDesvincular, padroes = [], onPadrao }) {
+  const padraoCasado = encontrarPadrao(entry, padroes);
   const cor = STATUS_COR[entry.status] || STATUS_COR.pendente;
   const isCredito = entry.tipo === 'credito';
   const Icon = isCredito ? TrendingUp : TrendingDown;
@@ -525,6 +566,16 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
               </div>
             )}
 
+            {entry.status === 'pendente' && padraoCasado && (
+              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-indigo-500">
+                <SlidersHorizontal size={11} />
+                Padrão ativo:{' '}
+                <span className="font-medium text-indigo-700">
+                  {padraoCasado.category?.nome || 'sem categoria'}
+                </span>
+              </div>
+            )}
+
             {/* Lançamento vinculado (só conciliadas) */}
             {entry.status === 'conciliado' && entry.transaction && (
               <div className="mt-2 ml-3 pl-3 border-l-2 border-emerald-200">
@@ -568,6 +619,15 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
                   title="Criar lançamento novo a partir desta entry"
                 >
                   <Plus size={11} /> Criar lançamento
+                </button>
+                <button
+                  onClick={onPadrao}
+                  disabled={busy}
+                  className="btn-secondary text-xs flex items-center gap-1 px-2.5 py-1.5 disabled:opacity-50"
+                  title={padraoCasado ? 'Editar o padrão OFX deste histórico' : 'Criar um padrão OFX para este histórico'}
+                >
+                  <SlidersHorizontal size={11} />
+                  {padraoCasado ? 'Editar padrão' : 'Padrão'}
                 </button>
                 <button
                   onClick={onIgnorar}
@@ -837,7 +897,7 @@ function CandidateRow({ candidate, loading, onSelect }) {
 // Modal de quick-create — cria Transaction nova a partir da entry
 // ─────────────────────────────────────────────────────────────────────────────
 
-function QuickCreateModal({ entry, onClose, onCreated }) {
+function QuickCreateModal({ entry, onClose, onCreated, padroes = [] }) {
   const { categorias } = useCategories();
 
   const isCredito = entry.tipo === 'credito';
@@ -849,7 +909,7 @@ function QuickCreateModal({ entry, onClose, onCreated }) {
   const categoriasFiltradas = useMemo(() => {
     if (!categorias) return [];
     return categorias.filter((c) =>
-      !c.tipo || c.tipo === tipoTransaction || c.tipo === 'ambos'
+      !c.tipo || c.tipo === tipoTransaction || c.tipo === 'ambos' || c.tipo === 'transferencia'
     );
   }, [categorias, tipoTransaction]);
 
@@ -857,7 +917,10 @@ function QuickCreateModal({ entry, onClose, onCreated }) {
   const [complemento, setComplemento] = useState(
     entry.descricao && entry.memo && entry.descricao !== entry.memo ? entry.memo : ''
   );
-  const [categoryId, setCategoryId] = useState(entry.suggestedCategoryId || '');
+  const padraoCasado = useMemo(() => encontrarPadrao(entry, padroes), [entry, padroes]);
+  const [categoryId, setCategoryId] = useState(
+    entry.suggestedCategoryId || padraoCasado?.categoryId || ''
+  );
   const [saving, setSaving]         = useState(false);
   const [errorMsg, setErrorMsg]     = useState('');
 
@@ -992,6 +1055,279 @@ function QuickCreateModal({ entry, onClose, onCreated }) {
             ) : (
               <>Criar e conciliar</>
             )}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modal de Padrão OFX — cria ou edita o padrão (histórico -> categoria) que
+// casa com o histórico deste item do extrato.
+// ─────────────────────────────────────────────────────────────────────────────
+function PatternModal({ entry, padroes, onClose, onSaved }) {
+  const { categorias } = useCategories();
+
+  // Lista local de categorias (permite refletir categoria recém-criada
+  // sem depender de reload do hook compartilhado).
+  const [categoriasLocais, setCategoriasLocais] = useState([]);
+  useEffect(() => { setCategoriasLocais(categorias || []); }, [categorias]);
+
+  // Estado do criador de categoria inline.
+  const [criandoCategoria, setCriandoCategoria] = useState(false);
+  const [novaCatNome, setNovaCatNome]           = useState('');
+  const [novaCatTipo, setNovaCatTipo]           = useState(
+    entry.tipo === 'credito' ? 'receita' : 'despesa'
+  );
+  const [novaCatNatureza, setNovaCatNatureza]   = useState('variavel');
+  const [salvandoCat, setSalvandoCat]           = useState(false);
+  const [catErro, setCatErro]                   = useState('');
+
+  async function criarCategoria() {
+    if (!novaCatNome.trim()) {
+      setCatErro('Informe o nome da categoria.');
+      return;
+    }
+    setSalvandoCat(true);
+    setCatErro('');
+    try {
+      const { data: resp } = await api.post('/categories', {
+        nome: novaCatNome.trim(),
+        tipo: novaCatTipo,
+        natureza: novaCatNatureza,
+      });
+      const nova = resp.data || resp;
+      setCategoriasLocais((prev) => [...prev, nova].sort(
+        (a, b) => (a.nome || '').localeCompare(b.nome || '')
+      ));
+      setCategoryId(nova.id);
+      setCriandoCategoria(false);
+      setNovaCatNome('');
+    } catch (err) {
+      setCatErro(err.response?.data?.error || 'Erro ao criar categoria.');
+    }
+    setSalvandoCat(false);
+  }
+
+  const existente = useMemo(
+    () => encontrarPadrao(entry, padroes),
+    [entry, padroes]
+  );
+  const isEdicao = !!existente;
+
+  const textoSugerido = (entry.memo || entry.descricao || '').trim();
+
+  const [textoHistorico, setTextoHistorico] = useState(
+    existente?.textoHistorico || textoSugerido
+  );
+  const [categoryId, setCategoryId] = useState(
+    existente?.categoryId || entry.suggestedCategoryId || ''
+  );
+  const [complementoAuto, setComplementoAuto] = useState(
+    existente?.complementoAuto || ''
+  );
+  const [saving, setSaving]     = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Pré-visualização: o texto digitado casa com o histórico deste item?
+  const casa = useMemo(() => {
+    const t = textoHistorico.trim().toUpperCase();
+    if (!t) return false;
+    const alvo = `${entry.descricao || ''} ${entry.memo || ''}`.toUpperCase();
+    return alvo.includes(t);
+  }, [textoHistorico, entry]);
+
+  async function salvar() {
+    if (!textoHistorico.trim()) {
+      setErrorMsg('Informe o texto do histórico que identifica o padrão.');
+      return;
+    }
+    setSaving(true);
+    setErrorMsg('');
+    try {
+      const payload = {
+        textoHistorico: textoHistorico.trim(),
+        categoryId: categoryId || null,
+        complementoAuto: complementoAuto.trim() || null,
+      };
+      if (isEdicao) {
+        await api.put(`/ofx-patterns/${existente.id}`, payload);
+      } else {
+        await api.post('/ofx-patterns', payload);
+      }
+      onSaved();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || 'Erro ao salvar o padrão.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={!saving ? onClose : undefined}
+      title={isEdicao ? 'Editar padrão OFX' : 'Novo padrão OFX'}
+      size="md"
+    >
+      <div className="space-y-4">
+        {/* Histórico do item de referência */}
+        <div className="bg-slate-50 rounded-lg p-3">
+          <p className="text-[11px] text-slate-400 mb-0.5">Histórico do extrato</p>
+          <p className="text-sm text-navy-800 break-words">
+            {entry.memo || entry.descricao || '(sem descrição)'}
+          </p>
+        </div>
+
+        {/* Texto do histórico (gatilho do padrão) */}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">
+            Texto que identifica o padrão
+          </label>
+          <input
+            type="text"
+            value={textoHistorico}
+            onChange={(e) => setTextoHistorico(e.target.value)}
+            className="input w-full text-sm"
+            placeholder="Ex: TARIFA, PIX RECEBIDA FULANO, BOLETO SIEG..."
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Qualquer extrato cujo histórico <strong>contenha</strong> este texto receberá a
+            categoria abaixo como sugestão na importação.
+          </p>
+          {textoHistorico.trim() && (
+            <p className={`mt-1 text-[11px] ${casa ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {casa
+                ? '✓ Este texto casa com o histórico deste item.'
+                : '⚠ Este texto não casa com o histórico deste item.'}
+            </p>
+          )}
+        </div>
+
+        {/* Categoria (com criação inline) */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-medium text-slate-600">
+              Categoria sugerida
+            </label>
+            {!criandoCategoria && (
+              <button
+                type="button"
+                onClick={() => setCriandoCategoria(true)}
+                className="text-[11px] text-navy-600 hover:text-navy-800 flex items-center gap-1"
+              >
+                <Plus size={11} /> Nova categoria
+              </button>
+            )}
+          </div>
+
+          {!criandoCategoria ? (
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="input w-full text-sm"
+            >
+              <option value="">— Sem categoria —</option>
+              {(categoriasLocais || []).map((c) => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+          ) : (
+            <div className="border border-navy-200 rounded-lg p-3 space-y-2 bg-navy-50/40">
+              <input
+                type="text"
+                value={novaCatNome}
+                onChange={(e) => setNovaCatNome(e.target.value)}
+                className="input w-full text-sm"
+                placeholder="Nome da categoria"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <select
+                  value={novaCatTipo}
+                  onChange={(e) => setNovaCatTipo(e.target.value)}
+                  className="input flex-1 text-sm"
+                >
+                  <option value="despesa">Despesa</option>
+                  <option value="receita">Receita</option>
+                  <option value="ambos">Ambos</option>
+                  <option value="transferencia">Transferência</option>
+                </select>
+                <select
+                  value={novaCatNatureza}
+                  onChange={(e) => setNovaCatNatureza(e.target.value)}
+                  className="input flex-1 text-sm"
+                >
+                  <option value="variavel">Variável</option>
+                  <option value="fixa">Fixa</option>
+                </select>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Você pode completar contas contábeis e centros de custo depois, na tela de Categorias.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setCriandoCategoria(false); setNovaCatNome(''); setCatErro(''); }}
+                  disabled={salvandoCat}
+                  className="btn-secondary text-xs flex-1 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={criarCategoria}
+                  disabled={salvandoCat}
+                  className="btn-primary text-xs flex-1 flex items-center justify-center gap-1 disabled:opacity-50"
+                >
+                  {salvandoCat && <Loader2 size={12} className="animate-spin" />}
+                  Criar e usar
+                </button>
+              </div>
+              {catErro && (
+                <p className="text-[11px] text-red-600">{catErro}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Complemento automático (opcional) */}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">
+            Complemento automático <span className="text-slate-400">(opcional)</span>
+          </label>
+          <input
+            type="text"
+            value={complementoAuto}
+            onChange={(e) => setComplementoAuto(e.target.value)}
+            className="input w-full text-sm"
+            placeholder="Texto fixo a preencher no complemento do lançamento"
+          />
+        </div>
+
+        {errorMsg && (
+          <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-lg p-2.5">
+            <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="btn-secondary flex-1 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={salvar}
+            disabled={saving}
+            className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {isEdicao ? 'Salvar alterações' : 'Criar padrão'}
           </button>
         </div>
       </div>

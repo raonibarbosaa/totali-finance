@@ -114,13 +114,13 @@ export default function Clientes() {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             className="input-field pl-9"
-            placeholder="Buscar cliente..."
+            placeholder="Buscar empresa..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
         <button onClick={() => abrirModal()} className="btn-primary flex items-center gap-2">
-          <Plus size={15} /> Novo cliente
+          <Plus size={15} /> Nova empresa
         </button>
       </div>
 
@@ -249,7 +249,7 @@ export default function Clientes() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title={editando ? 'Editar cliente' : 'Novo cliente'}
+        title={editando ? 'Editar empresa' : 'Nova empresa'}
       >
         <div className="space-y-4">
           <div>

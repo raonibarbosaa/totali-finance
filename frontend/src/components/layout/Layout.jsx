@@ -26,7 +26,7 @@ const PAGE_TITLES = {
   '/app/fechamento':         'Fechamento de Competência',
   '/app/usuarios':           'Usuários',
   '/admin/dashboard':        'Painel Totali',
-  '/admin/clientes':         'Clientes',
+  '/admin/clientes':         'Empresas',
   '/admin/usuarios':         'Usuários Totali',
   '/admin/fechamentos':      'Fechamentos',
 };

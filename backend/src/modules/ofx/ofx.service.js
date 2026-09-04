@@ -67,15 +67,30 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
     });
 
     const fitids = parsed.transactions.map((t) => t.fitid);
-    const existingFitids = new Set(
-      (await tx.ofxEntry.findMany({
-        where: { bankAccountId, fitid: { in: fitids } },
-        select: { fitid: true },
-      })).map((e) => e.fitid)
-    );
 
+    // FITIDs que já existem em ofx_entries desta conta (de importações anteriores).
+    // Opção A: em vez de descartá-los, REAPROVEITAMOS — movemos esses entries
+    // para a importação atual, preservando status (conciliado/pendente/ignorado)
+    // e o vínculo com a Transaction (transactionId). Assim eles aparecem nas
+    // abas corretas DESTA importação (ex.: já conciliados vão pra aba Conciliadas).
+    const entriesExistentes = await tx.ofxEntry.findMany({
+      where:  { bankAccountId, fitid: { in: fitids } },
+      select: { id: true, fitid: true },
+    });
+    const idsExistentes      = entriesExistentes.map((e) => e.id);
+    const existingFitidsSet  = new Set(entriesExistentes.map((e) => e.fitid));
+
+    // Reaproveita: traz os entries existentes para esta importação.
+    if (idsExistentes.length) {
+      await tx.ofxEntry.updateMany({
+        where: { id: { in: idsExistentes } },
+        data:  { ofxImportId: imp.id },
+      });
+    }
+
+    // Apenas os FITIDs realmente novos viram entries 'pendente'.
     const novasEntriesData = parsed.transactions
-      .filter((t) => !existingFitids.has(t.fitid))
+      .filter((t) => !existingFitidsSet.has(t.fitid))
       .map((t) => ({
         tenantId,
         ofxImportId:   imp.id,
@@ -89,30 +104,24 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
         status:        'pendente',
       }));
 
-    if (novasEntriesData.length === 0) {
-      await tx.ofxImport.update({
-        where: { id: imp.id },
-        data: { totalRegistros: 0, conciliados: 0, pendentes: 0 },
-      });
-      return {
-        importId:        imp.id,
-        totalRegistros:  parsed.transactions.length,
-        novasEntries:    0,
-        duplicatasFitid: parsed.transactions.length,
-        autoConciliados: 0,
-        pendentes:       0,
-      };
+    if (novasEntriesData.length) {
+      await tx.ofxEntry.createMany({ data: novasEntriesData });
     }
-
-    await tx.ofxEntry.createMany({ data: novasEntriesData });
 
     const entries = await tx.ofxEntry.findMany({
       where:   { ofxImportId: imp.id },
       orderBy: { dataMovimento: 'asc' },
     });
 
+    // Só passam pelo auto-match as entries pendentes ainda sem vínculo.
+    // Entries reaproveitadas de importações anteriores (já conciliadas ou
+    // ignoradas) mantêm seu estado e não são reprocessadas.
+    const entriesParaAutoMatch = entries.filter(
+      (e) => e.status === 'pendente' && !e.transactionId
+    );
+
     let autoConciliados = 0;
-    for (const e of entries) {
+    for (const e of entriesParaAutoMatch) {
       const tipoTransaction = e.tipo === 'credito' ? 'receita' : 'despesa';
       const candidato = await tx.transaction.findFirst({
         where: {
@@ -147,23 +156,31 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
 
     await aplicarSugestoesCategoria(tx, tenantId, imp.id);
 
-    const pendentes = entries.length - autoConciliados;
-    await tx.ofxImport.update({
-      where: { id: imp.id },
-      data:  {
-        totalRegistros: entries.length,
-        conciliados:    autoConciliados,
-        pendentes,
-      },
+    // Recalcula contadores a partir do estado real de TODAS as entries do
+    // import (novas + reaproveitadas), agrupando por status.
+    await recalcularContadoresImport(tx, imp.id);
+
+    const reaproveitadas = idsExistentes.length;
+    const novas          = novasEntriesData.length;
+
+    // Conciliados refletidos nesta importação: os auto-conciliados agora +
+    // os reaproveitados que já vieram conciliados de antes.
+    const jaConciliadasReaproveitadas = await tx.ofxEntry.count({
+      where: { ofxImportId: imp.id, status: 'conciliado' },
+    });
+    const pendentesFinal = await tx.ofxEntry.count({
+      where: { ofxImportId: imp.id, status: 'pendente' },
     });
 
     return {
       importId:        imp.id,
       totalRegistros:  parsed.transactions.length,
-      novasEntries:    entries.length,
-      duplicatasFitid: parsed.transactions.length - entries.length,
+      novasEntries:    novas,
+      reaproveitadas,
+      duplicatasFitid: reaproveitadas,
       autoConciliados,
-      pendentes,
+      conciliados:     jaConciliadasReaproveitadas,
+      pendentes:       pendentesFinal,
     };
   });
 }

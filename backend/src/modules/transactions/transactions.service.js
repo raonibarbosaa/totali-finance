@@ -2,7 +2,7 @@ const prisma = require('../../config/database');
 async function list(tenantId, filters={}) {
   const { tipo, status, bankAccountId, categoryId, search, dateFrom, dateTo, page=1, limit=50 } = filters;
   const skip = (page-1)*parseInt(limit);
-  const where = { tenantId, ...(tipo&&{tipo}), ...(status&&{status}), ...(bankAccountId&&{bankAccountId}), ...(categoryId==='__sem__'?{categoryId:null}:categoryId&&{categoryId}), ...(dateFrom||dateTo?{dataLancamento:{...(dateFrom&&{gte:new Date(dateFrom)}), ...(dateTo&&{lte:new Date(dateTo+"T23:59:59")})}}:{}), ...(search&&{OR:[{descricao:{contains:search,mode:"insensitive"}},{complemento:{contains:search,mode:"insensitive"}}]}) };
+  const where = { tenantId, ...(tipo&&{tipo}), ...(status&&{status}), ...(bankAccountId&&{bankAccountId}), ...(categoryId==='__sem__'?{categoryId:null,tipo:{not:'transferencia'}}:categoryId&&{categoryId}), ...(dateFrom||dateTo?{dataLancamento:{...(dateFrom&&{gte:new Date(dateFrom)}), ...(dateTo&&{lte:new Date(dateTo+"T23:59:59")})}}:{}), ...(search&&{OR:[{descricao:{contains:search,mode:"insensitive"}},{complemento:{contains:search,mode:"insensitive"}}]}) };
   const [data, total] = await Promise.all([
     prisma.transaction.findMany({ where, include:{ category:{select:{id:true,nome:true}}, bankAccount:{select:{id:true,nome:true}}, customer:{select:{id:true,nome:true}}, supplier:{select:{id:true,nome:true}} }, orderBy:[{ dataLancamento:"desc" }, { criadoEm:"desc" }], skip, take:parseInt(limit) }),
     prisma.transaction.count({ where }),
