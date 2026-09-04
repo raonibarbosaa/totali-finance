@@ -59,9 +59,6 @@ export function ExportacaoDominioPage() {
 export function FechamentoPage() {
   return <PlaceholderPage titulo="Fechamento de Competência" descricao="Feche competências e bloqueie lançamentos." etapa="Etapa 9" />;
 }
-export function UsuariosEmpresaPage() {
-  return <PlaceholderPage titulo="Usuários" descricao="Gerencie os usuários desta empresa." etapa="Etapa 1 — em breve" />;
-}
 export function AdminFechamentosPage() {
   return <PlaceholderPage titulo="Fechamentos" descricao="Status de fechamento de todos os clientes." etapa="Etapa 9" />;
 }

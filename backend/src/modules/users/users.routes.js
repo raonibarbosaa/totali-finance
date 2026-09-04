@@ -11,7 +11,9 @@ router.use(authMiddleware);
 // service.podeGerenciarUsuario — sem isso qualquer usuário logado conseguia
 // alterar ou bloquear qualquer outro do sistema.
 router.get('/', tenantGuard, ctrl.listar);
-router.post('/', tenantGuard, ctrl.criar);
+// Criar usuário exige nível 1: sem isso um usuário básico da empresa
+// conseguia criar um login gerencial e escalar o próprio acesso.
+router.post('/', tenantGuard, roleGuard(1), ctrl.criar);
 router.patch('/senha', ctrl.trocarSenha);
 router.get('/:id', tenantGuard, ctrl.buscar);
 router.put('/:id', tenantGuard, ctrl.atualizar);

@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { PrivateRoute, AdminRoute } from './routes/PrivateRoute';
+import { PrivateRoute, AdminRoute, RoleRoute } from './routes/PrivateRoute';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import EsqueciSenha from './pages/EsqueciSenha';
@@ -30,7 +30,8 @@ import ExportacaoDominio from './pages/ExportacaoDominio';
 import FechamentoCompetencia from './pages/FechamentoCompetencia';
 import ComparativoMensal from './pages/ComparativoMensal';
 import PainelAdmin from './pages/PainelAdmin';
-import { AdminFechamentosPage, UsuariosEmpresaPage } from './pages/Placeholders';
+import UsuariosEmpresa from './pages/cliente/Usuarios';
+import { AdminFechamentosPage } from './pages/Placeholders';
 
 export default function App() {
   return (
@@ -63,7 +64,7 @@ export default function App() {
           <Route path="fechamento" element={<FechamentoCompetencia />} />
           <Route path="fornecedores" element={<Fornecedores />} />
           <Route path="clientes" element={<Clientes />} />
-          <Route path="usuarios" element={<UsuariosEmpresaPage />} />
+          <Route path="usuarios" element={<RoleRoute minRole={1}><UsuariosEmpresa /></RoleRoute>} />
         </Route>
         <Route path="/admin" element={<PrivateRoute requireTenant={false}><Layout /></PrivateRoute>}>
           <Route index element={<Navigate to="dashboard" replace />} />
