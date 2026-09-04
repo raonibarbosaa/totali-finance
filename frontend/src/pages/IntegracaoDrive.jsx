@@ -112,6 +112,10 @@ export default function IntegracaoDrive() {
     return corpo?.error || e?.message || 'Erro desconhecido.';
   }
 
+  // "Conectada" só quando o servidor realmente consegue usar o Drive —
+  // ter pasta salva no banco não basta.
+  const integracaoPronta = !!config?.active && config?.integracao?.pronta !== false;
+
   // ── Baixar OFX original ──────────────────────────────────────────────────
   async function handleDownload(log) {
     try {
@@ -143,15 +147,19 @@ export default function IntegracaoDrive() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${config?.active ? 'bg-emerald-50' : 'bg-gray-50'}`}>
-              <Cloud className={config?.active ? 'text-emerald-600' : 'text-gray-400'} size={24} />
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${integracaoPronta ? 'bg-emerald-50' : 'bg-gray-50'}`}>
+              <Cloud className={integracaoPronta ? 'text-emerald-600' : 'text-gray-400'} size={24} />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-[#152740]">Status da Conexão</h2>
-                {config?.active ? (
+                {integracaoPronta ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
                     <CheckCircle2 size={12} /> Conectada
+                  </span>
+                ) : config?.active ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-red-50 text-red-700 border border-red-100">
+                    <AlertCircle size={12} /> Indisponível no servidor
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700 border border-amber-100">
@@ -159,6 +167,24 @@ export default function IntegracaoDrive() {
                   </span>
                 )}
               </div>
+
+              {/* Pasta salva no banco, mas o servidor não consegue falar com o
+                  Google: antes isso aparecia como "Conectada" e o usuário só
+                  descobria o problema ao tentar baixar um arquivo. */}
+              {config?.active && !integracaoPronta && (
+                <div className="mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  <p className="text-sm text-red-800 font-medium">
+                    A importação automática não está funcionando.
+                  </p>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    {config.integracao?.motivo || 'Integração indisponível no servidor.'}
+                  </p>
+                  <p className="text-xs text-red-700 mt-1">
+                    Nenhum extrato será importado sozinho até isso ser resolvido —
+                    use "Importar OFX" enquanto isso.
+                  </p>
+                </div>
+              )}
 
               {config?.active ? (
                 <div className="mt-2 space-y-1 text-sm">

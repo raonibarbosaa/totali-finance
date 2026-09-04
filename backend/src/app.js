@@ -120,10 +120,18 @@ app.listen(PORT, () => {
   console.log(`✅ TotaliFinance API rodando na porta ${PORT}`);
   console.log(`   Ambiente: ${process.env.NODE_ENV || 'development'}`);
 
-  // Inicia o poller do Google Drive (a cada 15 minutos)
-  if (process.env.GOOGLE_DRIVE_ENABLED === 'true') {
+  // Inicia o poller do Google Drive (a cada 15 minutos).
+  // O estado é sempre anunciado no log: antes, quando a variável não estava
+  // ligada, o robô simplesmente não subia e nada indicava isso.
+  const driveSvc = require('./modules/drive/drive.service');
+  const drive = driveSvc.statusIntegracao();
+
+  if (drive.pronta) {
     const { startPoller } = require('./modules/drive/drive.poller');
     startPoller(15);
+    console.log('   Google Drive: importação automática ativa (a cada 15 min)');
+  } else {
+    console.warn(`   Google Drive: importação automática INATIVA — ${drive.motivo}`);
   }
 
   // Scheduler diário de notificações de contas a pagar

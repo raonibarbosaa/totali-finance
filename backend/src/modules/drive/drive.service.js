@@ -2,13 +2,47 @@
 const { google } = require('googleapis');
 const { PrismaClient } = require('@prisma/client');
 const path = require('path');
+const fs = require('fs');
 const prisma = new PrismaClient();
 
 const KEY_FILE = path.resolve(__dirname, '../../../config/google-drive-key.json');
 const SCOPES   = ['https://www.googleapis.com/auth/drive'];
 
+/**
+ * A integração depende de duas coisas fora do código: a chave da conta de
+ * serviço no disco e a variável de ambiente ligada. Sem uma delas nada
+ * funciona — e antes isso falhava em silêncio, com a tela dizendo "Conectada".
+ */
+function statusIntegracao() {
+  const chavePresente = fs.existsSync(KEY_FILE);
+  const habilitada = process.env.GOOGLE_DRIVE_ENABLED === 'true';
+
+  let motivo = null;
+  if (!chavePresente && !habilitada) {
+    motivo = 'Falta a chave da conta de serviço e a variável GOOGLE_DRIVE_ENABLED.';
+  } else if (!chavePresente) {
+    motivo = 'Chave da conta de serviço do Google não encontrada no servidor.';
+  } else if (!habilitada) {
+    motivo = 'Importação automática desligada (GOOGLE_DRIVE_ENABLED não está como "true").';
+  }
+
+  return {
+    pronta: chavePresente && habilitada,
+    chavePresente,
+    habilitada,
+    caminhoChave: KEY_FILE,
+    motivo,
+  };
+}
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 function getAuth() {
+  if (!fs.existsSync(KEY_FILE)) {
+    throw new Error(
+      `Chave de acesso ao Google Drive não encontrada em ${KEY_FILE}. ` +
+      'Coloque o google-drive-key.json da conta de serviço nessa pasta e reinicie o backend.'
+    );
+  }
   return new google.auth.GoogleAuth({ keyFile: KEY_FILE, scopes: SCOPES });
 }
 
@@ -121,6 +155,7 @@ async function saveImportLog({ tenantId, driveFileId, fileName, status, transact
 }
 
 module.exports = {
+  statusIntegracao,
   listNewOFXFiles,
   downloadFile,
   moveToProcessed,

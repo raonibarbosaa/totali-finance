@@ -11,7 +11,9 @@ const err = (res, e, s = 400)    => res.status(s).json({ success: false, error: 
 exports.getConfig = async (req, res) => {
   try {
     const config = await prisma.driveConfig.findUnique({ where: { tenantId: req.tenantId } });
-    ok(res, config);
+    // Vai junto se a integração está de fato utilizável no servidor: ter uma
+    // pasta salva no banco não significa que o Drive responde.
+    ok(res, config ? { ...config, integracao: driveSvc.statusIntegracao() } : null);
   } catch(e) { err(res, e); }
 };
 

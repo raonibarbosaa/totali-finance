@@ -42,6 +42,12 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       EMAIL_FROM: ${EMAIL_FROM:-TotaliFinance <noreply@totalicontabilidade.com.br>}
       EMAIL_ADMIN: ${EMAIL_ADMIN:-financeiro@totalicontabilidade.com.br}
+      GOOGLE_DRIVE_ENABLED: ${GOOGLE_DRIVE_ENABLED:-false}
+    volumes:
+      # Chave da conta de serviço do Google, montada de fora da imagem: assada
+      # dentro do build ela se perderia a cada reconstrução — e credencial não
+      # deve morar em imagem Docker.
+      - ./backend/config:/app/config:ro
     networks:
       - internal
       - traefik-public
