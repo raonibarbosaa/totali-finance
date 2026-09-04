@@ -248,6 +248,11 @@ export default function AdminUsuarios() {
                         </span>
                       )}
                     </div>
+                  ) : u.perfil === 'admin_total' ? (
+                    // Admin Total enxerga todas as empresas por definição, sem
+                    // precisar de vínculo — "Sem vínculos" dava a impressão
+                    // errada de que a pessoa não acessava nada.
+                    <span className="text-xs text-navy-600 font-medium">Todas as empresas</span>
                   ) : (
                     <span className="text-xs text-slate-400">Sem vínculos</span>
                   )}
