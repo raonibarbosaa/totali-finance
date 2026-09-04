@@ -67,10 +67,24 @@ exports.downloadOriginal = async (req, res) => {
     const log = await prisma.ofxImportLog.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
     });
-    if (!log) throw new Error('Log não encontrado');
-    if (!log.driveFileId) throw new Error('Arquivo não disponível no Drive');
+    if (!log) return err(res, new Error('Importação não encontrada.'), 404);
+    if (!log.driveFileId) {
+      return err(res, new Error('Este arquivo não ficou guardado no Drive — não há o que baixar.'), 404);
+    }
 
-    const content = await driveSvc.downloadFile(log.driveFileId);
+    let content;
+    try {
+      content = await driveSvc.downloadFile(log.driveFileId);
+    } catch (e) {
+      // Falha do lado do Google (arquivo apagado, movido, permissão revogada).
+      // Registrar no log do servidor: sem isso o erro sumia sem deixar rastro.
+      const motivo = e?.response?.data?.error?.message || e.message;
+      console.error(`[DRIVE] Falha ao baixar ${log.driveFileId} (${log.fileName}): ${motivo}`);
+      return err(res, new Error(
+        `O Google não entregou o arquivo: ${motivo}. Ele pode ter sido apagado ou movido da pasta.`
+      ), 502);
+    }
+
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${log.fileName}"`);
     res.send(content);

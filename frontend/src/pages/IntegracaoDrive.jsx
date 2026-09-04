@@ -94,6 +94,24 @@ export default function IntegracaoDrive() {
     }
   }
 
+  // Numa requisição com responseType 'blob', o corpo de erro também chega como
+  // blob — por isso o motivo real ficava escondido atrás de um "status code 400".
+  async function mensagemDeErro(e) {
+    const corpo = e?.response?.data;
+
+    if (corpo instanceof Blob) {
+      try {
+        const texto = await corpo.text();
+        const json = JSON.parse(texto);
+        if (json?.error) return json.error;
+      } catch (_) {
+        // corpo não era JSON — cai no genérico abaixo
+      }
+    }
+
+    return corpo?.error || e?.message || 'Erro desconhecido.';
+  }
+
   // ── Baixar OFX original ──────────────────────────────────────────────────
   async function handleDownload(log) {
     try {
@@ -107,7 +125,7 @@ export default function IntegracaoDrive() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert('Erro ao baixar arquivo: ' + (e?.response?.data?.error || e.message));
+      alert('Erro ao baixar arquivo: ' + (await mensagemDeErro(e)));
     }
   }
 
