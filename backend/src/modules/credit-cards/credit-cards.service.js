@@ -21,6 +21,8 @@
 const crypto = require('crypto');
 const prisma = require('../../config/database');
 const { escolherLeitor, listarEmissores } = require('./parsers');
+const padroesSvc = require('../card-patterns/card-patterns.service');
+const titlesSvc  = require('../titles/titles.service');
 
 // Importa a lib direto de lib/. O index.js do pacote tem um bloco de depuração
 // que tenta ler um PDF de teste do disco, e estoura quando ele não existe.
@@ -31,6 +33,11 @@ const MIN_TEXTO = 50;
 
 const sha256 = (v) => crypto.createHash('sha256').update(v).digest('hex');
 
+const includeCartao = {
+  bankAccount:    { select: { id: true, nome: true } },
+  categoryFatura: { select: { id: true, nome: true, contaDebito: true, contaCredito: true } },
+};
+
 // ─────────────────────────────────────────────────────────────────────────
 // Cartões
 // ─────────────────────────────────────────────────────────────────────────
@@ -38,7 +45,7 @@ const sha256 = (v) => crypto.createHash('sha256').update(v).digest('hex');
 async function listCards(tenantId) {
   const cards = await prisma.creditCard.findMany({
     where:   { tenantId, ativo: true },
-    include: { bankAccount: { select: { id: true, nome: true } } },
+    include: includeCartao,
     orderBy: { nome: 'asc' },
   });
 
@@ -58,7 +65,7 @@ async function listCards(tenantId) {
 async function findCard(id, tenantId) {
   const c = await prisma.creditCard.findFirst({
     where:   { id, tenantId },
-    include: { bankAccount: { select: { id: true, nome: true } } },
+    include: includeCartao,
   });
   if (!c) throw { status: 404, message: 'Cartão não encontrado' };
   return c;
@@ -75,6 +82,7 @@ function validarDia(valor, rotulo) {
 
 async function createCard(tenantId, data = {}) {
   const { nome, emissor, bandeira, ultimos4, limite, diaFechamento, diaVencimento, bankAccountId } = data;
+  // contaCartao e categoryIdFatura sao lidos direto de `data` mais abaixo.
   if (!nome || !String(nome).trim()) throw { status: 400, message: 'Nome do cartão obrigatório' };
 
   if (ultimos4 && !/^\d{4}$/.test(String(ultimos4))) {
@@ -85,6 +93,10 @@ async function createCard(tenantId, data = {}) {
   if (bankAccountId) {
     const conta = await prisma.bankAccount.findFirst({ where: { id: bankAccountId, tenantId } });
     if (!conta) throw { status: 404, message: 'Conta bancária não encontrada' };
+  }
+  if (data.categoryIdFatura) {
+    const cat = await prisma.category.findFirst({ where: { id: data.categoryIdFatura, tenantId } });
+    if (!cat) throw { status: 404, message: 'Categoria da fatura não encontrada' };
   }
 
   return prisma.creditCard.create({
@@ -98,8 +110,10 @@ async function createCard(tenantId, data = {}) {
       diaFechamento: validarDia(diaFechamento, 'Dia de fechamento'),
       diaVencimento: validarDia(diaVencimento, 'Dia de vencimento'),
       bankAccountId: bankAccountId || null,
+      contaCartao:      data.contaCartao ? String(data.contaCartao).trim() : null,
+      categoryIdFatura: data.categoryIdFatura || null,
     },
-    include: { bankAccount: { select: { id: true, nome: true } } },
+    include: includeCartao,
   });
 }
 
@@ -113,6 +127,10 @@ async function updateCard(id, tenantId, data = {}) {
     const conta = await prisma.bankAccount.findFirst({ where: { id: data.bankAccountId, tenantId } });
     if (!conta) throw { status: 404, message: 'Conta bancária não encontrada' };
   }
+  if (data.categoryIdFatura) {
+    const cat = await prisma.category.findFirst({ where: { id: data.categoryIdFatura, tenantId } });
+    if (!cat) throw { status: 404, message: 'Categoria da fatura não encontrada' };
+  }
 
   return prisma.creditCard.update({
     where: { id },
@@ -125,8 +143,10 @@ async function updateCard(id, tenantId, data = {}) {
       ...(data.diaFechamento !== undefined && { diaFechamento: validarDia(data.diaFechamento, 'Dia de fechamento') }),
       ...(data.diaVencimento !== undefined && { diaVencimento: validarDia(data.diaVencimento, 'Dia de vencimento') }),
       ...(data.bankAccountId !== undefined && { bankAccountId: data.bankAccountId || null }),
+      ...(data.contaCartao   !== undefined && { contaCartao: data.contaCartao ? String(data.contaCartao).trim() : null }),
+      ...(data.categoryIdFatura !== undefined && { categoryIdFatura: data.categoryIdFatura || null }),
     },
-    include: { bankAccount: { select: { id: true, nome: true } } },
+    include: includeCartao,
   });
 }
 
@@ -268,6 +288,9 @@ async function importStatement({ tenantId, userId, creditCardId, fileBuffer, fil
       skipDuplicates: true,
     });
 
+    // Classificação automática pelo de-para, antes de devolver o resumo.
+    await classificarLinhas(tx, tenantId, statement.id);
+
     const gravadas = await tx.cardStatementEntry.count({
       where: { cardStatementId: statement.id },
     });
@@ -284,6 +307,105 @@ async function importStatement({ tenantId, userId, creditCardId, fileBuffer, fil
       valorTotalInformado: cabecalho.valorTotalInformado ?? null,
     };
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Classificação
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Aplica o de-para nas linhas ainda sem categoria de uma fatura.
+ *
+ * Os padrões são carregados UMA vez e casados em memória: uma fatura tem
+ * dezenas de linhas e os padrões são os mesmos para todas.
+ *
+ * Só mexe em linha sem categoria. Reimportar ou reclassificar não desfaz o que
+ * o usuário ajustou à mão.
+ */
+async function classificarLinhas(tx, tenantId, cardStatementId) {
+  const padroes = await padroesSvc.carregarAtivos(tenantId, tx);
+  if (padroes.length === 0) return { classificadas: 0 };
+
+  const linhas = await tx.cardStatementEntry.findMany({
+    where:  { cardStatementId, categoryId: null, supplierId: null },
+    select: { id: true, descricao: true },
+  });
+
+  let classificadas = 0;
+  for (const l of linhas) {
+    const padrao = padroesSvc.casar(l.descricao, padroes);
+    if (!padrao) continue;
+
+    await tx.cardStatementEntry.update({
+      where: { id: l.id },
+      data: {
+        categoryId: padrao.categoryId || null,
+        supplierId: padrao.supplierId || null,
+        complementoAuto: padrao.complementoAuto || null,
+        status: 'classificado',
+      },
+    });
+    classificadas += 1;
+  }
+  return { classificadas };
+}
+
+/** Reaplica o de-para numa fatura já importada, depois de criar regras novas. */
+async function reclassificar(statementId, tenantId) {
+  await findStatement(statementId, tenantId);
+  return prisma.$transaction((tx) => classificarLinhas(tx, tenantId, statementId));
+}
+
+/** Ajuste manual de uma linha. */
+async function classificarLinha(entryId, tenantId, { categoryId, supplierId }) {
+  const linha = await prisma.cardStatementEntry.findFirst({ where: { id: entryId, tenantId } });
+  if (!linha) throw { status: 404, message: 'Linha não encontrada' };
+  if (linha.transactionId) {
+    throw {
+      status: 400,
+      message: 'Esta linha já virou lançamento. Desfaça a geração antes de reclassificar.',
+    };
+  }
+
+  if (categoryId) {
+    const c = await prisma.category.findFirst({ where: { id: categoryId, tenantId } });
+    if (!c) throw { status: 404, message: 'Categoria não encontrada' };
+  }
+  if (supplierId) {
+    const f = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId } });
+    if (!f) throw { status: 404, message: 'Fornecedor não encontrado' };
+  }
+
+  return prisma.cardStatementEntry.update({
+    where: { id: entryId },
+    data: {
+      ...(categoryId !== undefined && { categoryId: categoryId || null }),
+      ...(supplierId !== undefined && { supplierId: supplierId || null }),
+      status: (categoryId || supplierId) ? 'classificado' : 'pendente',
+    },
+  });
+}
+
+/**
+ * Aplica a mesma classificação a TODAS as linhas com a mesma descrição na
+ * fatura. Na fatura real da Cora, isso resolve seis linhas de APPLE de uma vez.
+ */
+async function classificarPorDescricao(statementId, tenantId, { descricao, categoryId, supplierId }) {
+  await findStatement(statementId, tenantId);
+  if (!descricao) throw { status: 400, message: 'Descrição obrigatória' };
+
+  const r = await prisma.cardStatementEntry.updateMany({
+    where: {
+      tenantId, cardStatementId: statementId, descricao,
+      transactionId: null,
+    },
+    data: {
+      categoryId: categoryId || null,
+      supplierId: supplierId || null,
+      status: (categoryId || supplierId) ? 'classificado' : 'pendente',
+    },
+  });
+  return { atualizadas: r.count };
 }
 
 /**
@@ -350,7 +472,9 @@ async function findStatement(id, tenantId) {
     st.valorTotalInformado === null ? null : Number(st.valorTotalInformado)
   );
 
-  return { ...st, entries, ...resumo };
+  // A tela precisa saber, ANTES de gerar, quantas linhas ficariam sem
+  // codificação contábil: elas somem da exportação para o Domínio.
+  return { ...st, entries, ...resumo, geracao: diagnosticar(entries) };
 }
 
 /**
@@ -378,9 +502,245 @@ async function removeStatement(id, tenantId) {
   return { ok: true };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Geração dos lançamentos
+//
+// COMO A DESPESA FICA
+// Cada compra vira uma despesa que NÃO toca saldo de banco: o dinheiro só sai
+// quando a fatura é paga. O credito vai para a conta de cartão a pagar.
+//
+// AS DUAS DATAS
+// dataCompetencia = data da compra, dataLancamento = vencimento da fatura.
+// Assim o DRE fecha nos dois regimes: por competência a despesa aparece no mês
+// da compra, por caixa no mês em que a fatura é paga.
+//
+// PARCELA É EXCEÇÃO
+// A parcela leva competência do MÊS DA FATURA, e não do mês da compra original.
+// Se levasse, importar a fatura de setembro mudaria o resultado de maio, que o
+// escritório já entregou ao cliente.
+//
+// O PAGAMENTO DA FATURA
+// Vira um título a pagar, baixado como qualquer outro. Não é despesa: as
+// compras já foram lançadas. O título debita cartão a pagar e credita o banco.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Tipos de linha que viram despesa. Pagamento antecipado fica de fora: ele já
+// saiu do banco quando aconteceu, e aqui só abate o valor do título.
+const TIPOS_DESPESA = ['compra', 'encargo'];
+
+const fmtMesAno = (d) =>
+  new Date(d).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/** Monta a descrição do lançamento: estabelecimento, parcela e portador. */
+function descricaoDoLancamento(linha) {
+  const partes = [linha.descricao];
+  if (linha.parcelaNumero && linha.parcelaTotal) {
+    partes.push(`${linha.parcelaNumero}/${linha.parcelaTotal}`);
+  }
+  if (linha.portador) partes.push(`(${linha.portador})`);
+  return partes.join(' ').slice(0, 255);
+}
+
+/** Quantas linhas ficariam sem codificação contábil, e por quê. */
+function diagnosticar(entries) {
+  const geraveis = entries.filter((e) => e.transactionId === null &&
+    (TIPOS_DESPESA.includes(e.tipo) || e.tipo === 'estorno'));
+  const semCategoria = geraveis.filter((e) => !e.categoryId);
+  return {
+    geraveis: geraveis.length,
+    semCategoria: semCategoria.length,
+    jaGerados: entries.filter((e) => e.transactionId !== null).length,
+  };
+}
+
+/**
+ * Gera os lançamentos de uma fatura e o título do pagamento.
+ *
+ * Tudo numa transação só: ou sai completo, ou não sai nada. Uma fatura pela
+ * metade seria pior que nenhuma.
+ */
+async function gerarLancamentos(statementId, tenantId, userId) {
+  const st = await findStatement(statementId, tenantId);
+  const card = await findCard(st.creditCardId, tenantId);
+
+  const diag = diagnosticar(st.entries);
+  if (diag.jaGerados > 0) {
+    throw {
+      status: 400,
+      code: 'JA_GERADO',
+      message: `Esta fatura já gerou ${diag.jaGerados} lançamento(s). Desfaça a geração antes de gerar de novo.`,
+    };
+  }
+  if (diag.geraveis === 0) {
+    throw { status: 400, message: 'Não há linhas para gerar lançamento nesta fatura.' };
+  }
+
+  // A conta de cartão a pagar é o crédito de toda compra. Sem ela o lançamento
+  // sai sem codificação e some da exportação para o Domínio.
+  if (!card.contaCartao) {
+    throw {
+      status: 400,
+      code: 'CARTAO_SEM_CONTA',
+      message:
+        `O cartão "${card.nome}" não tem a conta contábil de cartão a pagar configurada. ` +
+        'Cadastre-a no cartão: ela é o crédito de cada compra.',
+    };
+  }
+  if (!card.categoryIdFatura) {
+    throw {
+      status: 400,
+      code: 'CARTAO_SEM_CATEGORIA_FATURA',
+      message:
+        `O cartão "${card.nome}" não tem a categoria do pagamento da fatura configurada. ` +
+        'Ela é usada no título a pagar que a fatura gera.',
+    };
+  }
+
+  const vencimento = st.dataVencimento || st.competencia || new Date();
+  const totalFatura = st.valorTotalInformado !== null && st.valorTotalInformado !== undefined
+    ? Number(st.valorTotalInformado)
+    : st.somaLinhas;
+
+  // Categorias das linhas, para herdar a codificação contábil de uma vez.
+  const idsCat = [...new Set(st.entries.map((e) => e.categoryId).filter(Boolean))];
+  const cats = idsCat.length
+    ? await prisma.category.findMany({ where: { id: { in: idsCat }, tenantId } })
+    : [];
+  const porCat = Object.fromEntries(cats.map((c) => [c.id, c]));
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    let criados = 0;
+    let semCodificacao = 0;
+
+    for (const linha of st.entries) {
+      if (linha.transactionId) continue;
+      const ehDespesa = TIPOS_DESPESA.includes(linha.tipo);
+      const ehEstorno = linha.tipo === 'estorno';
+      if (!ehDespesa && !ehEstorno) continue;   // pagamento não vira lançamento
+
+      const cat = linha.categoryId ? porCat[linha.categoryId] : null;
+
+      // Parcela fica na competência do mês da fatura; o resto, na data da compra.
+      const ehParcelada = !!(linha.parcelaNumero && linha.parcelaTotal);
+      const dataCompetencia = ehParcelada ? vencimento : linha.dataCompra;
+
+      const contaDebito  = cat?.contaDebito || null;
+      if (!contaDebito) semCodificacao += 1;
+
+      const lanc = await tx.transaction.create({
+        data: {
+          tenantId,
+          // Estorno é lançamento contrário: abate a despesa.
+          tipo:            ehEstorno ? 'receita' : 'despesa',
+          descricao:       descricaoDoLancamento(linha),
+          valor:           Number(linha.valor),
+          dataLancamento:  vencimento,
+          dataCompetencia,
+          // Compra de cartão não mexe em saldo de banco.
+          bankAccountId:   null,
+          categoryId:      linha.categoryId || null,
+          supplierId:      linha.supplierId || null,
+          complemento:     linha.complementoAuto || null,
+          status:          'realizado',
+          origem:          'cartao',
+          criadoPor:       userId,
+          // Débito vem da categoria; crédito é sempre cartão a pagar.
+          contaDebito,
+          contaCredito:    card.contaCartao,
+          codHistorico:    cat?.codHistorico || null,
+          centroCustoD:    cat?.centroCustoD || null,
+          centroCustoC:    cat?.centroCustoC || null,
+        },
+      });
+
+      await tx.cardStatementEntry.update({
+        where: { id: linha.id },
+        data:  { transactionId: lanc.id },
+      });
+      criados += 1;
+    }
+
+    return { criados, semCodificacao };
+  });
+
+  // O título fica FORA da transação acima porque titlesSvc.create abre a sua
+  // própria. Se falhar, os lançamentos ficam e o desfazer limpa tudo.
+  const titulo = await titlesSvc.create(tenantId, userId, {
+    tipo:           'pagar',
+    descricao:      `Fatura ${card.nome} — ${fmtMesAno(vencimento)}`,
+    valor:          totalFatura,
+    dataVencimento: new Date(vencimento).toISOString().slice(0, 10),
+    dataEmissao:    new Date(vencimento).toISOString().slice(0, 10),
+    categoryId:     card.categoryIdFatura,
+    bankAccountId:  card.bankAccountId || null,
+    observacao:     `Gerado da fatura importada em ${new Date(st.importadoEm).toLocaleDateString('pt-BR')}`,
+  });
+
+  return {
+    ...resultado,
+    tituloId:    titulo.id,
+    valorTitulo: totalFatura,
+    vencimento,
+  };
+}
+
+/**
+ * Desfaz a geração: apaga os lançamentos e o título.
+ *
+ * Recusa se algum lançamento já foi exportado para o Domínio, porque apagá-lo
+ * criaria diferença entre o que foi entregue e o que ficou no sistema.
+ */
+async function desfazerLancamentos(statementId, tenantId) {
+  const st = await findStatement(statementId, tenantId);
+
+  const ids = st.entries.map((e) => e.transactionId).filter(Boolean);
+  if (ids.length === 0) throw { status: 400, message: 'Esta fatura não gerou lançamentos.' };
+
+  const exportados = await prisma.transaction.count({
+    where: { tenantId, id: { in: ids }, exportado: true },
+  });
+  if (exportados > 0) {
+    throw {
+      status: 400,
+      message:
+        `${exportados} lançamento(s) desta fatura já foram exportados para o Domínio e não podem ser apagados. ` +
+        'Para corrigir, faça o lançamento contrário.',
+    };
+  }
+
+  // O título da fatura, encontrado pela descrição e vencimento.
+  const card = await findCard(st.creditCardId, tenantId);
+  const vencimento = st.dataVencimento || st.competencia;
+  const titulo = vencimento ? await prisma.title.findFirst({
+    where: {
+      tenantId, tipo: 'pagar',
+      descricao: `Fatura ${card.nome} — ${fmtMesAno(vencimento)}`,
+    },
+  }) : null;
+
+  if (titulo && titulo.status !== 'aberto') {
+    throw {
+      status: 400,
+      message: `O título desta fatura já está ${titulo.status}. Estorne a baixa antes de desfazer a geração.`,
+    };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.cardStatementEntry.updateMany({
+      where: { cardStatementId: statementId },
+      data:  { transactionId: null },
+    });
+    const r = await tx.transaction.deleteMany({ where: { tenantId, id: { in: ids } } });
+    if (titulo) await tx.title.delete({ where: { id: titulo.id } });
+    return { apagados: r.count, tituloApagado: !!titulo };
+  });
+}
+
 module.exports = {
   listCards, findCard, createCard, updateCard, removeCard,
   importStatement, listStatements, findStatement, removeStatement,
+  reclassificar, classificarLinha, classificarPorDescricao,
+  gerarLancamentos, desfazerLancamentos,
   listarEmissores,
   // Expostos para teste.
   _internos: { hashDaLinha, comOrdemNoDia, resumoDasLinhas },

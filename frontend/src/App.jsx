@@ -14,6 +14,7 @@ import Clientes from './pages/cliente/Clientes';
 import AdminUsuarios from './pages/admin/Usuarios';
 import ContasBancarias from './pages/cliente/ContasBancarias';
 import Cartoes from './pages/cliente/Cartoes';
+import PadroesCartao from './pages/cliente/PadroesCartao';
 import Categorias from './pages/cliente/Categorias';
 import PadroesOFX from './pages/cliente/PadroesOFX';
 import ConfiguracaoEmpresa from './pages/cliente/ConfiguracaoEmpresa';
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="padroes-ofx" element={<PadroesOFX />} />
           <Route path="contas-bancarias" element={<ContasBancarias />} />
           <Route path="cartoes" element={<Cartoes />} />
+          <Route path="padroes-cartao" element={<PadroesCartao />} />
           <Route path="faturas-cartao" element={<FaturaCartao />} />
           <Route path="configuracao" element={<ConfiguracaoEmpresa />} />
           <Route path="estoque" element={<Estoque />} />

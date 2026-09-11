@@ -43,8 +43,16 @@ async function generateExport(tenantId, userId, { dateFrom, dateTo, transactionI
     return ctoD && ctoC;
   });
 
+  // Quantos ficaram de fora por falta de conta de débito ou crédito. Antes o
+  // descarte era silencioso: o usuário exportava e nunca sabia que faltou
+  // lançamento no arquivo.
+  const descartados = transactions.length - exportaveis.length;
+
   if (!exportaveis.length) {
-    throw new Error('Nenhum lançamento com codificação Domínio completa encontrado no período.');
+    throw new Error(
+      `Nenhum lançamento com codificação Domínio completa encontrado no período. ` +
+      `${transactions.length} lançamento(s) foram encontrados, mas nenhum tem conta de débito e crédito.`
+    );
   }
 
   const lines = [];
@@ -86,6 +94,9 @@ async function generateExport(tenantId, userId, { dateFrom, dateTo, transactionI
   return {
     exportId:      exportLog.id,
     totalRegistros: exportaveis.length,
+    // Quantos do período NÃO entraram no arquivo por falta de codificação.
+    // A tela avisa, em vez de deixar o usuário descobrir no Domínio.
+    descartados,
     content,
     nomeArquivo,
   };

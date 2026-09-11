@@ -67,6 +67,7 @@ const SECOES = [
     itens: [
       { to: '/app/categorias',   icon: Tags,      label: 'Categorias' },
       { to: '/app/padroes-ofx',  icon: GitBranch, label: 'Padrões OFX' },
+      { to: '/app/padroes-cartao', icon: Tags, label: 'Padrões de Cartão' },
       { to: '/app/configuracao', icon: Settings,  label: 'Configuração' },
       { to: '/app/estoque',      icon: Package,   label: 'Estoque' },
     ],

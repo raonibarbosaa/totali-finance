@@ -39,13 +39,13 @@ export default function ExportacaoDominio() {
   });
 
   const toggleAll = () => {
-    const readyIds = preview.filter(p => p.ready).map(p => p.id);
+    const readyIds = preview.filter(p => p.pronto).map(p => p.id);
     setSelected(prev => prev.size === readyIds.length ? new Set() : new Set(readyIds));
   };
 
   const handleGenerate = async () => {
     const ids = selected.size > 0 ? [...selected] : null;
-    if (!ids && preview.filter(p => p.ready).length === 0) {
+    if (!ids && preview.filter(p => p.pronto).length === 0) {
       setError('Nenhum lançamento pronto para exportação (todos precisam de Conta Débito e Conta Crédito)');
       return;
     }
@@ -82,8 +82,11 @@ export default function ExportacaoDominio() {
     URL.revokeObjectURL(url);
   };
 
-  const readyCount   = preview.filter(p => p.ready).length;
-  const notReadyCount = preview.filter(p => !p.ready).length;
+  // O backend chama esse campo de `pronto`. A tela lia `ready`, que nunca
+  // existiu no retorno, entao a contagem dava zero e o botao Exportar ficava
+  // desabilitado para sempre.
+  const readyCount   = preview.filter(p => p.pronto).length;
+  const notReadyCount = preview.filter(p => !p.pronto).length;
 
   return (
     <div className="p-6 space-y-6">
@@ -165,13 +168,13 @@ export default function ExportacaoDominio() {
             <tbody>
               {preview.map(txn => (
                 <tr key={txn.id}
-                  onClick={() => txn.ready && toggleSelect(txn.id)}
+                  onClick={() => txn.pronto && toggleSelect(txn.id)}
                   className={`border-b border-gray-50 transition-colors cursor-pointer ${
-                    selected.has(txn.id) ? 'bg-[#152740]/5' : txn.ready ? 'hover:bg-gray-50' : 'opacity-50'
+                    selected.has(txn.id) ? 'bg-[#152740]/5' : txn.pronto ? 'hover:bg-gray-50' : 'opacity-50'
                   }`}>
                   <td className="px-4 py-3 text-center">
                     <input type="checkbox" checked={selected.has(txn.id)} readOnly
-                      disabled={!txn.ready}
+                      disabled={!txn.pronto}
                       className="w-4 h-4 accent-[#152740]" />
                   </td>
                   <td className="px-3 py-3 text-gray-600">{fmtDate(txn.date)}</td>
@@ -183,7 +186,7 @@ export default function ExportacaoDominio() {
                   <td className="px-3 py-3 text-center">
                     {txn.exported
                       ? <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">Já exportado</span>
-                      : txn.ready
+                      : txn.pronto
                         ? <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Pronto</span>
                         : <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full">Sem codificação</span>
                     }
@@ -198,13 +201,13 @@ export default function ExportacaoDominio() {
             <p className="text-xs font-medium text-gray-500 mb-2">Prévia do arquivo TXT (primeiras linhas):</p>
             <pre className="text-xs text-gray-600 font-mono bg-white border border-gray-200 rounded-xl p-3 overflow-x-auto">
               Data;CtoD;CtoC;Valor;Hist;Complemento;Filial;CCD;CCC{'\n'}
-              {preview.filter(p => p.ready).slice(0, 5).map(txn => {
+              {preview.filter(p => p.pronto).slice(0, 5).map(txn => {
                 const d = new Date(txn.date);
                 const date = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${d.getUTCFullYear()}`;
                 const val  = Number(txn.amount).toFixed(2).replace('.',',');
                 return `${date};${txn.conta_debito||''};${txn.conta_credito||''};${val};${txn.historico||''};${txn.description};${txn.filial};${txn.centro_custo_d||''};${txn.centro_custo_c||''}`;
               }).join('\n')}
-              {preview.filter(p => p.ready).length > 5 ? '\n...' : ''}
+              {preview.filter(p => p.pronto).length > 5 ? '\n...' : ''}
             </pre>
           </div>
         </div>

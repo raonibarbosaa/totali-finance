@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CreditCard, Plus, Edit2, Trash2, Check, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import creditCardsService from '../../services/creditCardsService';
+import api from '../../services/api';
 import { useBankAccounts } from '../../hooks/useFinanceData';
 import useRole from '../../hooks/useRole';
 import Modal from '../../components/ui/Modal';
@@ -16,6 +17,7 @@ import { formatCurrency } from '../../utils/formatters';
 const EMPTY = {
   nome: '', emissor: 'auto', bandeira: '', ultimos4: '',
   limite: '', diaFechamento: '', diaVencimento: '', bankAccountId: '',
+  contaCartao: '', categoryIdFatura: '',
 };
 
 const BANDEIRAS = ['Visa', 'Mastercard', 'Elo', 'American Express', 'Hipercard'];
@@ -23,6 +25,7 @@ const BANDEIRAS = ['Visa', 'Mastercard', 'Elo', 'American Express', 'Hipercard']
 export default function Cartoes() {
   const { hasRole } = useRole();
   const { contas }  = useBankAccounts();
+  const [categorias, setCategorias] = useState([]);
 
   const [cartoes, setCartoes]   = useState([]);
   const [emissores, setEmissores] = useState([]);
@@ -37,12 +40,16 @@ export default function Cartoes() {
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, e] = await Promise.all([
+      const [c, e, cat] = await Promise.all([
         creditCardsService.listCards(),
         creditCardsService.emissores(),
+        api.get('/categories'),
       ]);
       setCartoes(c.data.data || []);
       setEmissores(e.data.data || []);
+      // /categories pode vir agrupado por tipo; normaliza os dois formatos.
+      const lista = cat.data.data;
+      setCategorias(Array.isArray(lista) ? lista : Object.values(lista || {}).flat());
     } catch (_) {
       setCartoes([]);
     }
@@ -63,6 +70,8 @@ export default function Cartoes() {
       diaFechamento: cartao.diaFechamento ?? '',
       diaVencimento: cartao.diaVencimento ?? '',
       bankAccountId: cartao.bankAccountId || '',
+      contaCartao: cartao.contaCartao || '',
+      categoryIdFatura: cartao.categoryIdFatura || '',
     } : EMPTY);
     setModal(true);
   }
@@ -259,6 +268,35 @@ export default function Cartoes() {
             <p className="text-[10px] text-slate-400 mt-1">
               É por aqui que o pagamento da fatura vai virar lançamento na conta corrente.
             </p>
+          </div>
+
+          {/* Codificação contábil. Sem ela a geração de lançamentos não roda. */}
+          <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+              Contabilidade
+            </p>
+            <div>
+              <label className="input-label">Conta de cartão a pagar</label>
+              <input className="input-field" placeholder="Ex: 2.1.01"
+                value={form.contaCartao}
+                onChange={(e) => setForm({ ...form, contaCartao: e.target.value })} />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Vai no crédito de cada compra. A despesa é debitada na conta da categoria e
+                creditada aqui, porque o dinheiro ainda não saiu do banco.
+              </p>
+            </div>
+            <div>
+              <label className="input-label">Categoria do pagamento da fatura</label>
+              <select className="input-field" value={form.categoryIdFatura}
+                onChange={(e) => setForm({ ...form, categoryIdFatura: e.target.value })}>
+                <option value="">— Não informada —</option>
+                {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Usada no título a pagar que a fatura gera. Quando você baixa o título, ela
+                debita cartão a pagar e credita o banco.
+              </p>
+            </div>
           </div>
 
           {/* O emissor decide qual leitor de PDF é usado na importação. */}

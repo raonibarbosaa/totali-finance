@@ -36,3 +36,10 @@ exports.importStatement = async (req, res) => {
 exports.listStatements  = async (req, res) => { try { ok(res, await svc.listStatements(req.tenantId, req.query.creditCardId)); } catch(e){err(res,e);} };
 exports.findStatement   = async (req, res) => { try { ok(res, await svc.findStatement(req.params.id, req.tenantId));           } catch(e){err(res,e);} };
 exports.removeStatement = async (req, res) => { try { ok(res, await svc.removeStatement(req.params.id, req.tenantId));         } catch(e){err(res,e);} };
+
+// ── Classificacao e lancamentos ──────────────────────────────────────
+exports.reclassificar = async (req, res) => { try { ok(res, await svc.reclassificar(req.params.id, req.tenantId));                                   } catch(e){err(res,e);} };
+exports.classificarEmLote = async (req, res) => { try { ok(res, await svc.classificarPorDescricao(req.params.id, req.tenantId, req.body));            } catch(e){err(res,e);} };
+exports.classificarLinha  = async (req, res) => { try { ok(res, await svc.classificarLinha(req.params.entryId, req.tenantId, req.body));              } catch(e){err(res,e);} };
+exports.gerar             = async (req, res) => { try { ok(res, await svc.gerarLancamentos(req.params.id, req.tenantId, req.user.id), 201);           } catch(e){err(res,e);} };
+exports.desfazer          = async (req, res) => { try { ok(res, await svc.desfazerLancamentos(req.params.id, req.tenantId));                          } catch(e){err(res,e);} };

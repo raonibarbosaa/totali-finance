@@ -50,6 +50,15 @@ router.post  ('/statements/import', rGuard(1), handleUpload, ctrl.importStatemen
 router.get   ('/statements/:id',  rGuard(3), ctrl.findStatement);
 router.delete('/statements/:id',  rGuard(1), ctrl.removeStatement);
 
+// Classificacao e geracao. pGuard nao entra: nenhuma dessas rotas manda
+// dataLancamento no corpo, entao o guarda de competencia passaria batido de
+// qualquer forma. A trava de competencia fechada, se necessaria, vai no service.
+router.post('/statements/:id/reclassificar', rGuard(1), ctrl.reclassificar);
+router.post('/statements/:id/classificar',   rGuard(1), ctrl.classificarEmLote);
+router.post('/statements/:id/gerar',         rGuard(1), ctrl.gerar);
+router.post('/statements/:id/desfazer',      rGuard(1), ctrl.desfazer);
+router.put ('/entries/:entryId',             rGuard(1), ctrl.classificarLinha);
+
 router.get   ('/',      rGuard(3), ctrl.listCards);
 router.get   ('/:id',   rGuard(3), ctrl.findCard);
 router.post  ('/',      rGuard(1), ctrl.createCard);

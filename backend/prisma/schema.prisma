@@ -33,6 +33,7 @@ model Tenant {
   creditCards       CreditCard[]
   cardStatements    CardStatement[]
   cardStatementEntries CardStatementEntry[]
+  cardPatterns      CardPattern[]
   periodClosings    PeriodClosing[]
   exportLogs        ExportLog[]
   notifications     Notification[]
@@ -172,6 +173,8 @@ model Category {
   ofxPatterns     OfxPattern[]
   ofxEntriesSugeridas OfxEntry[] @relation("OfxEntrySuggestedCategory")
   cardEntries     CardStatementEntry[]
+  cardPatterns    CardPattern[]
+  cartoesFatura   CreditCard[] @relation("CategoriaFaturaCartao")
 
   @@index([tenantId])
   // Garante UMA categoria de cada código por empresa. Em Postgres, NULL não
@@ -493,13 +496,21 @@ model CreditCard {
   diaVencimento Int?     @map("dia_vencimento")
   // Conta de onde a fatura e paga. Opcional: nem todo cartao tem conta fixa.
   bankAccountId String?  @map("bank_account_id")
+  // Conta contabil de "cartao a pagar". Vai no CREDITO de cada compra: a
+  // despesa e debitada na conta da categoria e creditada aqui, porque o
+  // dinheiro ainda nao saiu do banco.
+  contaCartao   String?  @map("conta_cartao") @db.VarChar(20)
+  // Categoria do TITULO gerado para o pagamento da fatura. Quando o titulo e
+  // baixado, ela da a codificacao: debita cartao a pagar, credita o banco.
+  categoryIdFatura String? @map("category_id_fatura")
   ativo         Boolean  @default(true)
   criadoEm      DateTime @default(now()) @map("criado_em")
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id])
-  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
-  statements  CardStatement[]
-  entries     CardStatementEntry[]
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  bankAccount    BankAccount? @relation(fields: [bankAccountId], references: [id])
+  categoryFatura Category?    @relation("CategoriaFaturaCartao", fields: [categoryIdFatura], references: [id])
+  statements     CardStatement[]
+  entries        CardStatementEntry[]
 
   @@index([tenantId, ativo])
   @@map("credit_cards")
@@ -553,6 +564,8 @@ model CardStatementEntry {
   // para nao exigir outra migracao depois.
   categoryId      String?  @map("category_id")
   supplierId      String?  @map("supplier_id")
+  // Texto vindo do de-para, aplicado no complemento do lancamento gerado.
+  complementoAuto String?  @map("complemento_auto") @db.VarChar(255)
   transactionId   String?  @map("transaction_id")
   /// pendente | classificado | ignorado
   status          String   @default("pendente") @db.VarChar(20)
@@ -570,6 +583,40 @@ model CardStatementEntry {
   @@unique([creditCardId, hashLinha])
   @@index([tenantId, cardStatementId])
   @@map("card_statement_entries")
+}
+
+/// De-para do cartao: texto do estabelecimento -> categoria e fornecedor.
+///
+/// Separado do de-para de OFX de proposito: nome de loja nao se mistura com
+/// historico bancario, e um padrao generico criado para extrato classificaria
+/// errado uma compra de cartao.
+///
+/// Corrige dois defeitos do de-para de OFX:
+///   - la o empate entre dois padroes e resolvido pela ordem que o banco
+///     devolve, que e arbitraria. Aqui ha prioridade, e no empate vence o
+///     texto mais longo (o mais especifico)
+///   - la o complementoAuto e cadastravel na tela e o backend nunca o aplica.
+///     Aqui ele vai pro complemento do lancamento de verdade
+model CardPattern {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  /// Texto procurado na descricao da linha. Comparacao por "contem",
+  /// normalizada (maiusculas, sem acento, espaco colapsado).
+  texto           String   @db.VarChar(255)
+  categoryId      String?  @map("category_id")
+  supplierId      String?  @map("supplier_id")
+  complementoAuto String?  @map("complemento_auto") @db.VarChar(255)
+  /// Maior vence. No empate, decide o texto mais longo.
+  prioridade      Int      @default(0)
+  ativo           Boolean  @default(true)
+  criadoEm        DateTime @default(now()) @map("criado_em")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
+  supplier Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId, ativo])
+  @@map("card_patterns")
 }
 
 model PeriodClosing {
@@ -658,6 +705,7 @@ model Supplier {
   titles       Title[]
   transactions Transaction[]
   cardEntries  CardStatementEntry[]
+  cardPatterns CardPattern[]
 
   @@index([tenantId, ativo])
   @@index([tenantId, nome])

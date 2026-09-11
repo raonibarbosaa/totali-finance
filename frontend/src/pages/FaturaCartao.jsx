@@ -8,11 +8,13 @@
 // Classificação e geração de lançamentos vêm na Etapa 2.
 
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, CheckCircle2, CreditCard, FileUp, Loader2, Trash2, Upload,
+  Play, RotateCcw, Tags, Wand2,
 } from 'lucide-react';
 import creditCardsService from '../services/creditCardsService';
+import api from '../services/api';
 import useRole from '../hooks/useRole';
 import EmptyState from '../components/ui/EmptyState';
 import Modal from '../components/ui/Modal';
@@ -219,8 +221,10 @@ export default function FaturaCartao() {
             </div>
           )}
 
-          {/* Conferência */}
-          {detalhe && !carregandoDetalhe && <Conferencia f={detalhe} />}
+          {/* Conferência e classificação */}
+          {detalhe && !carregandoDetalhe && (
+            <Conferencia f={detalhe} onMudou={() => abrirDetalhe(detalhe.id)} podeAgir={hasRole(1)} />
+          )}
 
           {!detalhe && !carregandoDetalhe && faturas.length === 0 && cartaoId && (
             <div className="card">
@@ -254,9 +258,46 @@ export default function FaturaCartao() {
 // Conferência de uma fatura
 // ─────────────────────────────────────────────────────────────────────────
 
-function Conferencia({ f }) {
+function Conferencia({ f, onMudou, podeAgir }) {
   const bate = f.confere === true;
   const semTotal = f.confere === null;
+
+  const [categorias, setCategorias] = useState([]);
+  const [ocupado, setOcupado] = useState(false);
+  const [aviso, setAviso] = useState('');
+
+  useEffect(() => {
+    api.get('/categories')
+      .then((r) => {
+        const lista = r.data.data;
+        setCategorias(Array.isArray(lista) ? lista : Object.values(lista || {}).flat());
+      })
+      .catch(() => setCategorias([]));
+  }, []);
+
+  const g = f.geracao || { geraveis: 0, semCategoria: 0, jaGerados: 0 };
+  const jaGerou = g.jaGerados > 0;
+
+  async function acao(fn, mensagem) {
+    setOcupado(true);
+    setAviso('');
+    try {
+      const r = await fn();
+      setAviso(mensagem(r.data.data));
+      onMudou?.();
+    } catch (e) {
+      setAviso(e.response?.data?.error || 'Erro na operação.');
+    }
+    setOcupado(false);
+  }
+
+  const classificar = (entryId, categoryId) =>
+    acao(() => creditCardsService.classificarLinha(entryId, { categoryId: categoryId || null }),
+         () => '');
+
+  const classificarTodas = (descricao, categoryId) =>
+    acao(() => creditCardsService.classificarEmLote(f.id, { descricao, categoryId: categoryId || null }),
+         (d) => `${d.atualizadas} linha(s) classificada(s).`);
 
   return (
     <div className="space-y-4">
@@ -335,6 +376,74 @@ function Conferencia({ f }) {
         );
       })()}
 
+      {/* Classificação e geração */}
+      {podeAgir && (
+        <div className="card p-5 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <p className="text-sm font-medium text-navy-800">
+                {jaGerou
+                  ? `${g.jaGerados} lançamento(s) já gerados a partir desta fatura`
+                  : `${g.geraveis} linha(s) prontas para virar lançamento`}
+              </p>
+              {!jaGerou && g.semCategoria > 0 && (
+                <p className="text-xs text-amber-700 mt-0.5">
+                  {g.semCategoria} sem categoria. Elas geram lançamento, mas
+                  <strong> não saem na exportação do Domínio</strong> até serem classificadas.
+                </p>
+              )}
+            </div>
+
+            <Link to="/app/padroes-cartao"
+              className="flex items-center gap-1.5 text-xs text-navy-700 hover:underline">
+              <Tags size={13} /> Regras de classificação
+            </Link>
+
+            {!jaGerou && (
+              <button
+                onClick={() => acao(() => creditCardsService.reclassificar(f.id),
+                  (d) => `${d.classificadas} linha(s) classificada(s) pelas regras.`)}
+                disabled={ocupado}
+                className="btn-secondary flex items-center gap-1.5 text-xs disabled:opacity-50">
+                <Wand2 size={13} /> Aplicar regras
+              </button>
+            )}
+
+            {jaGerou ? (
+              <button
+                onClick={() => acao(() => creditCardsService.desfazer(f.id),
+                  (d) => `${d.apagados} lançamento(s) apagados.`)}
+                disabled={ocupado}
+                className="btn-danger flex items-center gap-1.5 text-xs disabled:opacity-50">
+                <RotateCcw size={13} /> Desfazer geração
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  // Gerar sem categoria é permitido, mas o usuário precisa ver
+                  // o número antes: esses lançamentos somem da exportação.
+                  if (g.semCategoria > 0 && !window.confirm(
+                    `${g.semCategoria} linha(s) estão sem categoria.\n\n` +
+                    'Elas vão gerar lançamento, mas não sairão no arquivo do Domínio ' +
+                    'até você classificá-las.\n\nGerar assim mesmo?')) return;
+                  acao(() => creditCardsService.gerar(f.id),
+                    (d) => `${d.criados} lançamento(s) e o título de ${formatCurrency(d.valorTitulo)} foram gerados.`);
+                }}
+                disabled={ocupado || g.geraveis === 0}
+                className="btn-primary flex items-center gap-1.5 text-xs disabled:opacity-50">
+                <Play size={13} /> Gerar lançamentos
+              </button>
+            )}
+          </div>
+
+          {aviso && (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+              {aviso}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Linhas */}
       <div className="card overflow-hidden">
         <div className="px-5 py-3 bg-navy-800 flex items-center justify-between">
@@ -354,6 +463,7 @@ function Conferencia({ f }) {
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Portador</th>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Parcela</th>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Tipo</th>
+                <th className="text-left px-4 py-2 text-slate-500 font-medium">Categoria</th>
                 <th className="text-right px-4 py-2 text-slate-500 font-medium">Valor</th>
               </tr>
             </thead>
@@ -377,6 +487,40 @@ function Conferencia({ f }) {
                         {TIPO_ESTILO[e.tipo]?.label || e.tipo}
                       </span>
                     </td>
+                    {/* Pagamento não vira lançamento, então não tem categoria. */}
+                    <td className="px-4 py-2">
+                      {e.tipo === 'pagamento' ? (
+                        <span className="text-slate-300 text-xs">—</span>
+                      ) : e.transactionId ? (
+                        <span className="text-xs text-slate-600">
+                          {categorias.find((c) => c.id === e.categoryId)?.nome || 'Sem categoria'}
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <select
+                            className="text-xs border border-slate-200 rounded px-1.5 py-1 max-w-[150px]"
+                            value={e.categoryId || ''}
+                            disabled={ocupado || !podeAgir}
+                            onChange={(ev) => classificar(e.id, ev.target.value)}>
+                            <option value="">Sem categoria</option>
+                            {categorias.map((c) => (
+                              <option key={c.id} value={c.id}>{c.nome}</option>
+                            ))}
+                          </select>
+                          {/* Uma fatura repete o mesmo estabelecimento várias
+                              vezes. Isso resolve todas de uma vez. */}
+                          {e.categoryId && (
+                            <button
+                              onClick={() => classificarTodas(e.descricao, e.categoryId)}
+                              disabled={ocupado}
+                              title={`Aplicar a todas as linhas de "${e.descricao}"`}
+                              className="text-slate-400 hover:text-navy-700 flex-shrink-0">
+                              <Wand2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className={`px-4 py-2 text-right font-medium whitespace-nowrap ${
                       abate ? 'text-emerald-600' : 'text-navy-800'
                     }`}>
@@ -391,8 +535,9 @@ function Conferencia({ f }) {
       </div>
 
       <p className="text-xs text-slate-400">
-        Nesta etapa a fatura é só lida e conferida. A classificação por categoria e a
-        geração dos lançamentos vêm na próxima entrega.
+        Cada compra vira despesa com competência na data da compra e caixa no vencimento da
+        fatura. Parcela fica na competência do mês da fatura. O pagamento da fatura vira um
+        título a pagar, que você baixa em Contas a Pagar.
       </p>
     </div>
   );

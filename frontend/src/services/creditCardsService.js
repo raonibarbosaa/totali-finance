@@ -23,6 +23,21 @@ const creditCardsService = {
   findStatement:   (id) => api.get(`/credit-cards/statements/${id}`),
   removeStatement: (id) => api.delete(`/credit-cards/statements/${id}`),
 
+  // ── Classificação e lançamentos (Etapa 2) ─────────────────────────
+  // Reaplica o de-para na fatura, depois de você criar regras novas.
+  reclassificar: (statementId) =>
+    api.post(`/credit-cards/statements/${statementId}/reclassificar`),
+
+  // Aplica a mesma categoria a todas as linhas com a mesma descrição.
+  classificarEmLote: (statementId, dados) =>
+    api.post(`/credit-cards/statements/${statementId}/classificar`, dados),
+
+  classificarLinha: (entryId, dados) =>
+    api.put(`/credit-cards/entries/${entryId}`, dados),
+
+  gerar:    (statementId) => api.post(`/credit-cards/statements/${statementId}/gerar`),
+  desfazer: (statementId) => api.post(`/credit-cards/statements/${statementId}/desfazer`),
+
   importStatement: (creditCardId, file) => {
     const fd = new FormData();
     fd.append('file', file);
