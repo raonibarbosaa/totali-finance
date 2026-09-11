@@ -599,17 +599,21 @@ async function baixar(id, tenantId, userId, dadosBaixa) {
 
   const dtPag = new Date(dataPagamento);
 
-  // Herda campos Domínio Contábil da categoria
+  // Herda a codificação contábil da categoria.
+  //
+  // Os nomes aqui estavam todos errados: o código lia dominioContaDebito e
+  // companhia, que NÃO existem em Category. O Prisma recusava a consulta e a
+  // baixa falhava sempre — o botão Pagar não funcionava.
   let dominioFields = {};
   if (titulo.categoryId) {
     const cat = await prisma.category.findUnique({
       where: { id: titulo.categoryId },
       select: {
-        dominioContaDebito:    true,
-        dominioContaCredito:   true,
-        dominioHistorico:      true,
-        dominioCentroCustoD:   true,
-        dominioCentroCustoC:   true,
+        contaDebito:  true,
+        contaCredito: true,
+        codHistorico: true,
+        centroCustoD: true,
+        centroCustoC: true,
       },
     });
     if (cat) dominioFields = cat;
@@ -622,19 +626,30 @@ async function baixar(id, tenantId, userId, dadosBaixa) {
     const transaction = await tx.transaction.create({
       data: {
         tenantId,
-        tipo:           titulo.tipo === 'pagar' ? 'saida' : 'entrada',
+        // 'pagar' vira despesa e 'receber' vira receita. Antes estava
+        // 'saida'/'entrada', que nenhum filtro do sistema reconhece.
+        tipo:           titulo.tipo === 'pagar' ? 'despesa' : 'receita',
         descricao:      titulo.descricao,
         valor:          Number(valorPago),
-        data:           dtPag,
+        dataLancamento: dtPag,
+        // Competência é uma DATA, não mês e ano separados. Na baixa ela é a
+        // própria data do pagamento: regime de caixa.
+        dataCompetencia: dtPag,
         bankAccountId,
         categoryId:     titulo.categoryId,
-        status:         'efetivado',
-        numeroDocumento: titulo.numeroDocumento,
-        nomeContato:     titulo.nomeContato,
-        observacao:      obsBaixa || null,
-        competenciaMes:  dtPag.getMonth() + 1,
-        competenciaAno:  dtPag.getFullYear(),
-        criadoPor:       userId,
+        status:         'realizado',
+        // Transaction não tem numeroDocumento nem nomeContato. O que era
+        // gravado neles ia junto com a observação, e agora vai no complemento,
+        // que é o campo de texto livre que existe de verdade.
+        complemento:    [
+          titulo.numeroDocumento && `Doc: ${titulo.numeroDocumento}`,
+          titulo.nomeContato,
+          obsBaixa,
+        ].filter(Boolean).join(' · ') || null,
+        supplierId:     titulo.supplierId || null,
+        customerId:     titulo.customerId || null,
+        origem:         'titulo',
+        criadoPor:      userId,
         ...dominioFields,
       },
     });
