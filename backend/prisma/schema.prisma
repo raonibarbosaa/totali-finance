@@ -29,6 +29,7 @@ model Tenant {
   ofxImports        OfxImport[]
   ofxEntries        OfxEntry[]
   stockAdjustments  StockAdjustment[]
+  balanceAdjustments BalanceAdjustment[]
   periodClosings    PeriodClosing[]
   exportLogs        ExportLog[]
   notifications     Notification[]
@@ -59,6 +60,7 @@ model User {
   titlesCriados       Title[]       @relation("TituloCriadoPor")
   recurringCriados    RecurringTitle[] @relation("RecurringCriadoPor")
   stocksCriados       StockAdjustment[]
+  ajustesSaldoCriados BalanceAdjustment[]
   periodsFechados     PeriodClosing[]  @relation("FechadoPor")
   periodsReabertos    PeriodClosing[]  @relation("ReabertoPor")
   exportacoes         ExportLog[]
@@ -130,6 +132,7 @@ model BankAccount {
   titles       Title[]
   ofxImports   OfxImport[]
   ofxEntries   OfxEntry[]
+  balanceAdjustments BalanceAdjustment[]
 
   @@index([tenantId])
   @@map("bank_accounts")
@@ -406,6 +409,43 @@ model StockAdjustment {
   criador User?  @relation(fields: [criadoPor], references: [id])
 
   @@map("stock_adjustments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BalanceAdjustment — trilha de auditoria do ajuste de saldo bancario.
+//
+// O saldo nao existe como coluna: e sempre derivado de
+// saldoInicial + receitas - despesas. Entao um ajuste e, na pratica, um
+// Transaction com origem='ajuste'. Esta tabela guarda o CONTEXTO que o
+// lancamento sozinho nao carrega: qual era o saldo do sistema, qual era o
+// saldo real do banco, e por que foi ajustado.
+//
+// saldoSistema e saldoReal sao FOTOGRAFIAS do momento da decisao. Recalcular
+// o saldo daquela data meses depois pode dar outro numero, porque lancamentos
+// antigos podem ter entrado no meio tempo. A fotografia preserva o que o
+// operador via na tela.
+// ─────────────────────────────────────────────────────────────────────────
+model BalanceAdjustment {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  bankAccountId String   @map("bank_account_id")
+  transactionId String?  @map("transaction_id")
+  dataAjuste    DateTime @map("data_ajuste") @db.Date
+  saldoSistema  Decimal  @map("saldo_sistema") @db.Decimal(15, 2)
+  saldoReal     Decimal  @map("saldo_real")    @db.Decimal(15, 2)
+  diferenca     Decimal  @db.Decimal(15, 2)
+  motivo        String   @db.VarChar(500)
+  // Quando este ajuste e o estorno de outro, aponta pro original.
+  estornoDe     String?  @map("estorno_de")
+  criadoPor     String?  @map("criado_por")
+  criadoEm      DateTime @default(now()) @map("criado_em")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
+  criador     User?       @relation(fields: [criadoPor], references: [id])
+
+  @@index([tenantId, bankAccountId])
+  @@map("balance_adjustments")
 }
 
 model PeriodClosing {

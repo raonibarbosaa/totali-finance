@@ -40,16 +40,24 @@ function fmt(n) {
 async function getDRE(tenantId, { year, month, regime = 'CASH' }) {
   const reg = regime.toUpperCase() === 'COMPETENCIA' ? 'COMPETENCIA' : 'CASH';
 
+  // Ajuste de saldo bancário fica FORA do DRE. Ele representa movimentação de
+  // natureza desconhecida (o cliente parou de lançar e o saldo foi acertado
+  // contra o extrato), então contá-lo como receita inflaria a base de imposto
+  // em Simples e Presumido.
+  const SEM_AJUSTE = { origem: { not: 'ajuste' } };
+
   // Filtro base de transações
   let where;
   if (reg === 'CASH') {
     where = {
       tenantId,
+      ...SEM_AJUSTE,
       dataLancamento: buildDateRange(year, month),
     };
   } else {
     where = {
       tenantId,
+      ...SEM_AJUSTE,
       dataCompetencia: buildDateRange(year, month),
     };
   }
@@ -154,6 +162,9 @@ async function getDRE(tenantId, { year, month, regime = 'CASH' }) {
 async function getDFC(tenantId, { year, month }) {
   const where = {
     tenantId,
+    // Mesmo motivo do DRE: o ajuste altera o saldo, mas não é fluxo de caixa
+    // de natureza conhecida, então não entra na demonstração.
+    origem: { not: 'ajuste' },
     dataLancamento: buildDateRange(year, month),
   };
 

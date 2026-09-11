@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Landmark, Plus, Edit2, Trash2, Check, TrendingUp,
-  TrendingDown, Wallet
+  TrendingDown, Wallet, Scale
 } from 'lucide-react';
 import api from '../../services/api';
 import useRole from '../../hooks/useRole';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import { formatCurrency } from '../../utils/formatters';
+import AjusteSaldoModal from '../../components/ui/AjusteSaldoModal';
 
 const TIPOS = [
   { value: 'corrente', label: 'Conta Corrente' },
@@ -38,6 +39,7 @@ export default function ContasBancarias() {
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [ajustando, setAjustando] = useState(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -230,6 +232,14 @@ export default function ContasBancarias() {
                 {hasRole(1) && (
                   <div className="flex gap-1">
                     <button
+                      onClick={() => setAjustando(conta)}
+                      className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50
+                                 rounded transition-colors"
+                      title="Ajustar saldo para bater com o extrato do banco"
+                    >
+                      <Scale size={13} />
+                    </button>
+                    <button
                       onClick={() => abrirModal(conta)}
                       className="p-1.5 text-slate-400 hover:text-navy-700 hover:bg-navy-50
                                  rounded transition-colors"
@@ -297,32 +307,71 @@ export default function ContasBancarias() {
             </div>
           </div>
 
+          {/* O saldo inicial é a âncora de todo o extrato. Numa conta que já tem
+              movimento, mudá-lo reescreveria o saldo de todos os períodos, sem
+              deixar rastro. Para isso existe o ajuste de saldo. */}
           <div className="bg-slate-50 rounded-xl p-4 space-y-3">
             <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
               Saldo inicial
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="input-label">Valor (R$)</label>
-                <input
-                  type="number" step="0.01" className="input-field"
-                  placeholder="0,00"
-                  value={form.saldoInicial}
-                  onChange={e => setForm({ ...form, saldoInicial: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="input-label">Data de referência</label>
-                <input
-                  type="date" className="input-field"
-                  value={form.dataSaldoInicial}
-                  onChange={e => setForm({ ...form, dataSaldoInicial: e.target.value })}
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-400">
-              O saldo atual será calculado a partir desta data e valor.
-            </p>
+
+            {editando?.temLancamentos ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="input-label">Valor (R$)</label>
+                    <div className="input-field bg-slate-100 text-slate-500 flex items-center">
+                      {formatCurrency(editando.saldoInicial)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="input-label">Data de referência</label>
+                    <div className="input-field bg-slate-100 text-slate-500 flex items-center">
+                      {form.dataSaldoInicial
+                        ? form.dataSaldoInicial.split('-').reverse().join('/')
+                        : '—'}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Esta conta já tem lançamentos, então o saldo inicial não pode mais ser
+                  alterado: mudá-lo reescreveria o saldo de todos os períodos já conferidos.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setModal(false); setAjustando(editando); }}
+                  className="flex items-center gap-1.5 text-xs text-navy-700 font-medium hover:underline"
+                >
+                  <Scale size={13} /> Ajustar saldo para bater com o extrato
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="input-label">Valor (R$)</label>
+                    <input
+                      type="number" step="0.01" className="input-field"
+                      placeholder="0,00"
+                      value={form.saldoInicial}
+                      onChange={e => setForm({ ...form, saldoInicial: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">Data de referência</label>
+                    <input
+                      type="date" className="input-field"
+                      value={form.dataSaldoInicial}
+                      onChange={e => setForm({ ...form, dataSaldoInicial: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  O saldo atual será calculado a partir desta data e valor.
+                  Depois do primeiro lançamento, este campo é travado.
+                </p>
+              </>
+            )}
           </div>
 
           {erro && (
@@ -344,6 +393,14 @@ export default function ContasBancarias() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal de ajuste de saldo */}
+      <AjusteSaldoModal
+        open={!!ajustando}
+        conta={ajustando}
+        onClose={() => setAjustando(null)}
+        onSaved={carregar}
+      />
 
       {/* Modal confirmação desativar */}
       <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Desativar conta" size="sm">

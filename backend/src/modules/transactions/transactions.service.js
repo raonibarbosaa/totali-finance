@@ -1,4 +1,7 @@
 const prisma = require('../../config/database');
+// Fonte única da definição de saldo — o extrato usa a MESMA regra das
+// telas de contas e do dashboard.
+const bankAccountsSvc = require('../bank-accounts/bank-accounts.service');
 async function list(tenantId, filters={}) {
   const { tipo, status, bankAccountId, categoryId, search, dateFrom, dateTo, page=1, limit=50 } = filters;
   const skip = (page-1)*parseInt(limit);
@@ -68,9 +71,15 @@ async function remove(id, tenantId) {
 // Extrato bancário (Etapa 5A) — usado pela página cliente/Extrato.jsx
 //
 // Calcula saldo anterior, saldo final, totais e saldo running por lançamento
-// para uma conta bancária num período. Considera apenas transactions com
-// status='realizado'. Transferências (que existem no DB como pares despesa+receita
-// em contas distintas) já são contabilizadas corretamente pelo filtro por conta.
+// para uma conta bancária num período.
+//
+// Considera os status efetivados ('realizado' e 'conciliado'), a mesma regra
+// de bank-accounts.service. Antes o extrato contava só 'realizado', então um
+// lançamento conciliado sumia daqui mas continuava no card de saldo da tela de
+// contas, e os dois números não batiam.
+//
+// Transferências (que existem no DB como pares despesa+receita em contas
+// distintas) já são contabilizadas corretamente pelo filtro por conta.
 // ─────────────────────────────────────────────────────────────────────────────
 async function extrato(tenantId, filters = {}) {
   const { bankAccountId, dataInicio, dataFim } = filters;
@@ -85,37 +94,28 @@ async function extrato(tenantId, filters = {}) {
   const inicio = new Date(dataInicio);
   const fim    = new Date(dataFim + 'T23:59:59');
 
-  const saldoInicial     = parseFloat(conta.saldoInicial || 0);
-  const dataSaldoInicial = conta.dataSaldoInicial;
+  // Saldo anterior = saldo da conta na véspera do início do período.
+  // Delegado para a fonte única, em vez de recalcular com regra própria.
+  const vespera = new Date(inicio);
+  vespera.setDate(vespera.getDate() - 1);
+  vespera.setHours(23, 59, 59, 999);
 
-  // Transações antes do período (a partir da data do saldo inicial, se houver)
-  const pre = await prisma.transaction.findMany({
-    where: {
-      tenantId,
-      bankAccountId,
-      status: 'realizado',
-      dataLancamento: {
-        lt: inicio,
-        ...(dataSaldoInicial && { gte: dataSaldoInicial }),
-      },
-    },
-    select: { tipo: true, valor: true },
-  });
-
-  const saldoAnterior = pre.reduce((acc, t) => {
-    const v = parseFloat(t.valor);
-    if (t.tipo === 'receita') return acc + v;
-    if (t.tipo === 'despesa') return acc - v;
-    return acc;
-  }, saldoInicial);
+  const { saldo: saldoAnterior } = await bankAccountsSvc.saldoNaData(
+    tenantId, bankAccountId, vespera
+  );
 
   // Transações dentro do período
   const lancamentos = await prisma.transaction.findMany({
     where: {
       tenantId,
       bankAccountId,
-      status: 'realizado',
-      dataLancamento: { gte: inicio, lte: fim },
+      status: { in: bankAccountsSvc.STATUS_EFETIVADOS },
+      dataLancamento: {
+        gte: inicio,
+        lte: fim,
+        // Respeita a data do saldo inicial, igual ao cálculo do saldo anterior.
+        ...(conta.dataSaldoInicial && { gte: new Date(Math.max(inicio, new Date(conta.dataSaldoInicial))) }),
+      },
     },
     include: {
       category:    { select: { id: true, nome: true } },

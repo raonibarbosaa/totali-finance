@@ -21,11 +21,13 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDay  = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-    // Filtro base: efetivadas e excluindo transferências internas
+    // Filtro base: efetivadas, excluindo transferências internas e ajustes de
+    // saldo. O ajuste entra no saldo da conta, mas não nos cards de receita e
+    // despesa — mesma regra do DRE.
     const baseFilter = {
       tenantId,
       status: { in: STATUS_EFETIVADOS },
-      origem: { not: 'transferencia' },
+      origem: { notIn: ['transferencia', 'ajuste'] },
     };
 
     // Filtro do mês corrente (atalho usado nas várias agregações de mês)
