@@ -93,10 +93,17 @@ export default function Lancamentos() {
       setLancamentos(items);
       setTotal(data.data.total || 0);
 
-      // Totais do período filtrado
-      const rec  = items.filter(t => t.tipo === 'receita' && t.status !== 'previsto' && t.origem !== 'transferencia').reduce((a, t) => a + Number(t.valor), 0);
-      const desp = items.filter(t => t.tipo === 'despesa' && t.status !== 'previsto' && t.origem !== 'transferencia').reduce((a, t) => a + Number(t.valor), 0);
-      setTotais({ receitas: rec, despesas: desp });
+      // Totais do período filtrado.
+      //
+      // Fora da soma: 'previsto' (ainda não aconteceu), 'transferencia' (dinheiro
+      // que só mudou de conta) e 'ajuste' (acerto de saldo, de natureza
+      // desconhecida). Os três continuam aparecendo na LISTA — o que muda é que
+      // não inflam os cartões de receita e despesa.
+      const NAO_SOMA = ['transferencia', 'ajuste'];
+      const soma = (tipo) => items
+        .filter(t => t.tipo === tipo && t.status !== 'previsto' && !NAO_SOMA.includes(t.origem))
+        .reduce((a, t) => a + Number(t.valor), 0);
+      setTotais({ receitas: soma('receita'), despesas: soma('despesa') });
     } catch (_) {}
     setLoading(false);
   }, [filtros, page]);

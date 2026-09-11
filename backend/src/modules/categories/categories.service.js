@@ -27,6 +27,19 @@ async function create(tenantId, data) {
 async function update(id, tenantId, data) {
   const r = await prisma.category.findFirst({ where:{ id, tenantId } });
   if (!r) throw { status:404, message:'Categoria não encontrada' };
+
+  // Categoria de sistema (ajuste de saldo): as contas contábeis e o nome podem
+  // ser editados, porque é o contador quem define o plano de contas. Mas o tipo
+  // não: ele é o que define o sentido do lançamento, e trocá-lo faria os
+  // ajustes de entrada saírem como saída no Domínio.
+  if (r.codigoSistema) {
+    if (data.tipo !== undefined && data.tipo !== r.tipo) {
+      throw { status:400, message:`O tipo da categoria "${r.nome}" não pode ser alterado: ele define o sentido do ajuste de saldo.` };
+    }
+    // O código é a identidade da categoria. Não sai daqui.
+    data = { ...data, codigoSistema: r.codigoSistema };
+  }
+
   // Receita/transferência sempre 'operacional'; só despesa pode ter distribuicao_lucros
   const tipoFinal = data.tipo !== undefined ? data.tipo : r.tipo;
   if (tipoFinal !== 'despesa') {
@@ -37,6 +50,13 @@ async function update(id, tenantId, data) {
 async function remove(id, tenantId) {
   const r = await prisma.category.findFirst({ where:{ id, tenantId } });
   if (!r) throw { status:404, message:'Categoria não encontrada' };
+
+  // Excluir a categoria do ajuste deixaria os ajustes futuros sem para onde ir,
+  // e o sistema a recriaria em branco no ajuste seguinte.
+  if (r.codigoSistema) {
+    throw { status:400, message:`A categoria "${r.nome}" é usada pelo ajuste de saldo e não pode ser excluída.` };
+  }
+
   await prisma.category.update({ where:{ id }, data:{ ativo:false } });
   return { ok:true };
 }

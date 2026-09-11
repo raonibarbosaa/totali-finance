@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { History, RotateCcw, TrendingDown, TrendingUp } from 'lucide-react';
 import Modal from './Modal';
-import SelectComCadastro from './SelectComCadastro';
 import balanceAdjustmentsService from '../../services/balanceAdjustmentsService';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 
@@ -21,7 +20,10 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
   const [data,       setData]       = useState(hojeISO());
   const [saldoReal,  setSaldoReal]  = useState('');
   const [motivo,     setMotivo]     = useState('');
-  const [categoryId, setCategoryId] = useState(null);
+  // Só usados no primeiro ajuste de cada sentido, enquanto a categoria fixa
+  // ainda não tem as contas do plano de contas da empresa.
+  const [contaDebito,  setContaDebito]  = useState('');
+  const [contaCredito, setContaCredito] = useState('');
 
   const [previa,     setPrevia]     = useState(null);
   const [carregando, setCarregando] = useState(false);
@@ -38,7 +40,8 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
     setData(hojeISO());
     setSaldoReal('');
     setMotivo('');
-    setCategoryId(null);
+    setContaDebito('');
+    setContaCredito('');
     setPrevia(null);
     setErro('');
     setVerHistorico(false);
@@ -83,9 +86,16 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
       ? null
       : Number((informado - saldoSistema).toFixed(2));
 
+  // A categoria sai do SENTIDO da diferença, não de uma escolha. O usuário só
+  // precisa informar as contas contábeis na primeira vez de cada sentido.
+  const sentido   = diferenca === null || diferenca === 0 ? null : diferenca > 0 ? 'entrada' : 'saida';
+  const categoria = sentido ? previa?.categorias?.[sentido] : null;
+  const precisaContas = !!categoria && !categoria.configurada;
+  const contasOk = !precisaContas || (contaDebito.trim() && contaCredito.trim());
+
   const motivoOk = motivo.trim().length >= MOTIVO_MIN;
   const podeSalvar =
-    !!previa && diferenca !== null && diferenca !== 0 && motivoOk && !!categoryId && !salvando;
+    !!previa && diferenca !== null && diferenca !== 0 && motivoOk && contasOk && !salvando;
 
   async function salvar() {
     setSalvando(true);
@@ -96,7 +106,11 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
         dataLancamento: data,
         saldoReal:      informado,
         motivo:         motivo.trim(),
-        categoryId,
+        // Vão só quando a categoria daquele sentido ainda não tem contas.
+        ...(precisaContas && {
+          contaDebito:  contaDebito.trim(),
+          contaCredito: contaCredito.trim(),
+        }),
       });
       onSaved?.();
       onClose?.();
@@ -113,7 +127,12 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
     setSalvando(true);
     setErro('');
     try {
-      await balanceAdjustmentsService.estornar(ajuste.id, justificativa);
+      await balanceAdjustmentsService.estornar(
+        ajuste.id, justificativa,
+        // O estorno tem sentido oposto, então usa a outra categoria. Se ela
+        // ainda não estiver configurada, reaproveita o que foi digitado acima.
+        { contaDebito: contaDebito.trim(), contaCredito: contaCredito.trim() },
+      );
       setEstornando(null);
       await carregarHistorico();
       await buscarPrevia();
@@ -190,30 +209,46 @@ export default function AjusteSaldoModal({ open, conta, onClose, onSaved }) {
           </div>
         )}
 
-        {/* Categoria é obrigatória: sem conta de débito e crédito, o ajuste
-            não sai na exportação para o Domínio. */}
-        <div>
-          <SelectComCadastro
-            label="Categoria contábil *"
-            endpoint="/categories"
-            value={categoryId}
-            onChange={(id) => setCategoryId(id)}
-            placeholder="Selecione a categoria do ajuste..."
-            cadastroFields={[
-              { name: 'nome',         label: 'Nome', required: true },
-              { name: 'tipo',         label: 'Tipo', type: 'select', required: true,
-                options: [{ value: 'receita', label: 'Receita' }, { value: 'despesa', label: 'Despesa' }] },
-              { name: 'natureza',     label: 'Natureza', type: 'select', required: true,
-                options: [{ value: 'variavel', label: 'Variável' }, { value: 'fixa', label: 'Fixa' }] },
-              { name: 'contaDebito',  label: 'Conta débito (Domínio)' },
-              { name: 'contaCredito', label: 'Conta crédito (Domínio)' },
-            ]}
-          />
-          <p className="text-[10px] text-slate-400 mt-1">
-            A categoria precisa ter conta de débito e crédito, senão o ajuste não sai
-            na exportação para o Domínio.
-          </p>
-        </div>
+        {/* A categoria é fixa e escolhida pelo sentido. Aqui ela é apenas
+            mostrada, para o contador conferir onde o lançamento vai cair. */}
+        {categoria && (
+          <div className="border border-slate-200 rounded-xl p-3">
+            <p className="text-xs text-slate-500 mb-1">Categoria contábil</p>
+            <p className="text-sm font-medium text-navy-800">{categoria.nome}</p>
+
+            {categoria.configurada ? (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Débito {categoria.contaDebito} · Crédito {categoria.contaCredito}
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  Primeiro ajuste de {sentido === 'entrada' ? 'entrada' : 'saída'} desta empresa.
+                  Informe as contas do plano de contas. Elas são pedidas uma única vez e
+                  passam a valer para os próximos ajustes deste sentido.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="input-label">Conta débito *</label>
+                    <input className="input-field" placeholder="Ex: 1101"
+                           value={contaDebito}
+                           onChange={(e) => setContaDebito(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="input-label">Conta crédito *</label>
+                    <input className="input-field" placeholder="Ex: 3301"
+                           value={contaCredito}
+                           onChange={(e) => setContaCredito(e.target.value)} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Sem essas contas o ajuste não sai na exportação para o Domínio.
+                  Depois dá para alterá-las em Cadastros e Categorias.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div>
           <label className="input-label">Motivo do ajuste *</label>

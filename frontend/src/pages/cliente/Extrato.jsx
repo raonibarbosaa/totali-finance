@@ -147,9 +147,14 @@ export default function Extrato() {
         </div>
       </div>
 
-      {/* Cards de resumo */}
+      {/* Cards de resumo.
+          O card de Ajustes só aparece quando houve ajuste no período. Ele não é
+          uma quarta parcela da conta: é a fatia das receitas e despesas acima
+          que veio de acerto manual de saldo. */}
       {dados && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-2 gap-3 ${
+          dados.totalAjustes ? 'md:grid-cols-5' : 'md:grid-cols-4'
+        }`}>
           {[
             {
               label: 'Saldo anterior',
@@ -169,6 +174,13 @@ export default function Extrato() {
               cor: 'text-red-500',
               bg: 'bg-red-50',
             },
+            ...(dados.totalAjustes ? [{
+              label: 'Ajustes de saldo',
+              value: dados.totalAjustes,
+              cor: 'text-amber-700',
+              bg: 'bg-amber-50',
+              nota: 'incluído nos totais acima',
+            }] : []),
             {
               label: 'Saldo final',
               value: dados.saldoFinal,
@@ -181,6 +193,9 @@ export default function Extrato() {
               <p className={`font-display font-semibold text-lg ${item.cor}`}>
                 {formatCurrency(item.value)}
               </p>
+              {item.nota && (
+                <p className="text-[10px] text-slate-400 mt-0.5">{item.nota}</p>
+              )}
             </div>
           ))}
         </div>

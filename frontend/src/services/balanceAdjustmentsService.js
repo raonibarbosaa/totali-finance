@@ -15,13 +15,18 @@ const balanceAdjustmentsService = {
   list: (bankAccountId) =>
     api.get('/balance-adjustments', { params: { bankAccountId } }),
 
-  // { bankAccountId, dataLancamento, saldoReal, motivo, categoryId }
+  // { bankAccountId, dataLancamento, saldoReal, motivo }
+  //
+  // Não recebe categoria: ela é fixa e o backend escolhe pelo sentido da
+  // diferença. contaDebito e contaCredito só vão no primeiro ajuste de cada
+  // sentido, quando a categoria ainda não tem as contas do plano de contas.
+  //
   // O campo de data se chama dataLancamento porque é o nome que o guarda de
   // competência fechada procura no corpo da requisição.
   create: (dados) => api.post('/balance-adjustments', dados),
 
-  estornar: (id, motivo, categoryId) =>
-    api.post(`/balance-adjustments/${id}/estornar`, { motivo, categoryId }),
+  estornar: (id, motivo, contas = {}) =>
+    api.post(`/balance-adjustments/${id}/estornar`, { motivo, ...contas }),
 };
 
 export default balanceAdjustmentsService;

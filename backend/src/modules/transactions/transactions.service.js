@@ -125,17 +125,27 @@ async function extrato(tenantId, filters = {}) {
   });
 
   // Saldo running e totais
+  //
+  // O ajuste de saldo CONTA nos totais de propósito. A tela mostra, na mesma
+  // linha, saldo anterior, entradas, saídas e saldo final, e essa conta precisa
+  // fechar. Tirar o ajuste só das entradas e saídas deixaria o rodapé errado.
+  //
+  // Para que ele não fique escondido no meio, `totalAjustes` informa à parte
+  // quanto do período veio de acerto manual — líquido, já com sinal.
   let saldoRolling  = saldoAnterior;
   let totalReceitas = 0;
   let totalDespesas = 0;
+  let totalAjustes  = 0;
   const lancamentosComSaldo = lancamentos.map((l) => {
     const v = parseFloat(l.valor);
     if (l.tipo === 'receita') {
       saldoRolling += v;
       totalReceitas += v;
+      if (l.origem === 'ajuste') totalAjustes += v;
     } else if (l.tipo === 'despesa') {
       saldoRolling -= v;
       totalDespesas += v;
+      if (l.origem === 'ajuste') totalAjustes -= v;
     }
     return { ...l, valor: v, saldo: Number(saldoRolling.toFixed(2)) };
   });
@@ -146,6 +156,8 @@ async function extrato(tenantId, filters = {}) {
     saldoAnterior: Number(saldoAnterior.toFixed(2)),
     totalReceitas: Number(totalReceitas.toFixed(2)),
     totalDespesas: Number(totalDespesas.toFixed(2)),
+    // Parcela dos totais acima que veio de ajuste de saldo (líquido, com sinal).
+    totalAjustes:  Number(totalAjustes.toFixed(2)),
     saldoFinal:    Number(saldoRolling.toFixed(2)),
     lancamentos:   lancamentosComSaldo,
   };

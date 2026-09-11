@@ -71,27 +71,112 @@ async function exigirCompetenciaAberta(tenantId, data) {
   }
 }
 
-/**
- * A categoria é obrigatória por causa da exportação para o Domínio:
- * export.service.js descarta em SILÊNCIO todo lançamento sem conta de débito
- * e crédito. Sem categoria, o ajuste sumiria do arquivo e o saldo do sistema
- * deixaria de bater com o Domínio.
- */
-async function carregarCategoria(categoryId, tenantId) {
-  if (!categoryId) {
-    throw { status: 400, message: 'Categoria obrigatória para o ajuste aparecer na exportação contábil' };
-  }
-  const cat = await prisma.category.findFirst({ where: { id: categoryId, tenantId } });
-  if (!cat) throw { status: 404, message: 'Categoria não encontrada' };
+// ─────────────────────────────────────────────────────────────────────────
+// Categorias fixas do ajuste
+//
+// O usuário não escolhe categoria: o ajuste sempre usa a mesma, e o sistema
+// decide qual pelo SENTIDO da diferença.
+//
+// São duas, e não uma, porque as contas de débito e crédito se invertem entre
+// entrada e saída. Numa entrada debita o banco e credita a contrapartida; numa
+// saída é o contrário. Com uma categoria só, metade dos ajustes sairia no
+// Domínio com as contas trocadas.
+//
+// Isso também é como o resto do sistema já funciona: cada categoria carrega um
+// par de contas fixo, e o tipo dela é que define o sentido.
+// ─────────────────────────────────────────────────────────────────────────
 
-  if (!cat.contaDebito || !cat.contaCredito) {
+const CATEGORIAS_SISTEMA = {
+  entrada: {
+    codigoSistema: 'ajuste_entrada',
+    nome:          'Ajuste de Saldo (Entrada)',
+    tipo:          'receita',
+  },
+  saida: {
+    codigoSistema: 'ajuste_saida',
+    nome:          'Ajuste de Saldo (Saída)',
+    tipo:          'despesa',
+  },
+};
+
+const configurada = (cat) => !!(cat && cat.contaDebito && cat.contaCredito);
+
+/**
+ * Devolve as duas categorias do ajuste, criando as que faltarem.
+ *
+ * Nascem SEM conta de débito e crédito: o sistema não tem como adivinhar o
+ * plano de contas da empresa. A tela pede uma única vez, no primeiro ajuste
+ * de cada sentido, e grava aqui.
+ */
+async function garantirCategorias(tenantId) {
+  const encontradas = await prisma.category.findMany({
+    where: {
+      tenantId,
+      codigoSistema: { in: Object.values(CATEGORIAS_SISTEMA).map((c) => c.codigoSistema) },
+    },
+  });
+
+  const porCodigo = Object.fromEntries(encontradas.map((c) => [c.codigoSistema, c]));
+  const resultado = {};
+
+  for (const [sentido, def] of Object.entries(CATEGORIAS_SISTEMA)) {
+    resultado[sentido] = porCodigo[def.codigoSistema] || await prisma.category.create({
+      data: {
+        tenantId,
+        nome:          def.nome,
+        tipo:          def.tipo,
+        natureza:      'variavel',
+        subtipo:       'operacional',
+        codigoSistema: def.codigoSistema,
+        // dfcType fica no default. Não importa muito: o ajuste é excluído do
+        // DFC pela origem, antes de chegar na classificação por categoria.
+      },
+    });
+  }
+
+  return resultado;
+}
+
+/**
+ * Escolhe a categoria pelo sentido e garante que ela tem as contas contábeis.
+ *
+ * Sem conta de débito e crédito, export.service.js descarta o lançamento em
+ * SILÊNCIO: o ajuste sumiria do TXT e o saldo do sistema deixaria de bater com
+ * o Domínio. Por isso, quando faltam, ou a chamada traz as contas para gravar,
+ * ou a operação para com um código que a tela reconhece para pedi-las.
+ */
+async function categoriaDoAjuste(tenantId, diferenca, contas = {}) {
+  const sentido = diferenca > 0 ? 'entrada' : 'saida';
+  const cats = await garantirCategorias(tenantId);
+  let cat = cats[sentido];
+
+  const debito  = String(contas.contaDebito  || '').trim();
+  const credito = String(contas.contaCredito || '').trim();
+
+  // Primeira vez: a tela manda as contas junto e elas ficam gravadas.
+  if (!configurada(cat) && debito && credito) {
+    cat = await prisma.category.update({
+      where: { id: cat.id },
+      data: {
+        contaDebito:  debito,
+        contaCredito: credito,
+        ...(contas.codHistorico && { codHistorico: String(contas.codHistorico).trim() }),
+      },
+    });
+  }
+
+  if (!configurada(cat)) {
     throw {
       status: 400,
+      code:   'CATEGORIA_SEM_CONTAS',
+      sentido,
+      categoria: { id: cat.id, nome: cat.nome, tipo: cat.tipo },
       message:
-        `A categoria "${cat.nome}" não tem conta de débito e crédito configuradas. ` +
-        'Sem elas o ajuste não sai na exportação para o Domínio.',
+        `Informe a conta de débito e a de crédito da categoria "${cat.nome}". ` +
+        'Elas são pedidas uma única vez e valem para os próximos ajustes deste sentido.',
     };
   }
+
   return cat;
 }
 
@@ -119,12 +204,23 @@ async function previa(tenantId, bankAccountId, data) {
   const { conta, saldo, receitas, despesas } =
     await bankAccountsSvc.saldoNaData(tenantId, bankAccountId, new Date(data + 'T23:59:59'));
 
+  // A tela precisa saber, ANTES de o usuário digitar o saldo real, se a
+  // categoria daquele sentido já tem contas contábeis. Assim ela mostra os
+  // campos no momento certo, em vez de deixar o erro estourar no salvar.
+  const cats = await garantirCategorias(tenantId);
+  const resumoCat = (c) => ({
+    id: c.id, nome: c.nome, tipo: c.tipo,
+    configurada: configurada(c),
+    contaDebito: c.contaDebito, contaCredito: c.contaCredito,
+  });
+
   return {
     bankAccount:  { id: conta.id, nome: conta.nome, banco: conta.banco },
     data,
     saldoSistema: saldo,
     receitas,
     despesas,
+    categorias: { entrada: resumoCat(cats.entrada), saida: resumoCat(cats.saida) },
   };
 }
 
@@ -208,10 +304,11 @@ async function gravarAjuste({
  * @param data.dataLancamento  nome escolhido para o periodGuard reconhecer
  * @param data.saldoReal       saldo que consta no extrato do banco
  * @param data.motivo          obrigatório
- * @param data.categoryId      obrigatória (exportação contábil)
+ * @param data.contaDebito     só no primeiro ajuste de cada sentido
+ * @param data.contaCredito    só no primeiro ajuste de cada sentido
  */
 async function create(tenantId, userId, data = {}) {
-  const { bankAccountId, dataLancamento, saldoReal, motivo, categoryId } = data;
+  const { bankAccountId, dataLancamento, saldoReal, motivo } = data;
 
   if (!bankAccountId)  throw { status: 400, message: 'Conta bancária obrigatória' };
   if (!dataLancamento) throw { status: 400, message: 'Data do ajuste obrigatória' };
@@ -237,7 +334,6 @@ async function create(tenantId, userId, data = {}) {
   if (isNaN(dataAjuste.getTime())) throw { status: 400, message: 'Data do ajuste inválida' };
 
   await exigirCompetenciaAberta(tenantId, dataLancamento);
-  const categoria = await carregarCategoria(categoryId, tenantId);
 
   // Saldo do sistema no fim do dia do ajuste.
   const fimDoDia = new Date(dataLancamento + 'T23:59:59');
@@ -251,6 +347,10 @@ async function create(tenantId, userId, data = {}) {
       message: 'O saldo do sistema já é igual ao saldo informado. Não há o que ajustar.',
     };
   }
+
+  // A categoria sai do SENTIDO da diferença, não de uma escolha do usuário.
+  // Por isso vem depois do cálculo.
+  const categoria = await categoriaDoAjuste(tenantId, diferenca, data);
 
   return gravarAjuste({
     tenantId, userId, conta, categoria,
@@ -293,20 +393,16 @@ async function estornar(id, tenantId, userId, data = {}) {
   hoje.setHours(0, 0, 0, 0);
   await exigirCompetenciaAberta(tenantId, hoje);
 
-  const lancamentoOriginal = original.transactionId
-    ? await prisma.transaction.findFirst({ where: { id: original.transactionId, tenantId } })
-    : null;
-
-  const categoria = await carregarCategoria(
-    data.categoryId || lancamentoOriginal?.categoryId,
-    tenantId
-  );
-
   const { conta, saldo: saldoSistema } =
     await bankAccountsSvc.saldoNaData(tenantId, original.bankAccountId);
 
   // Inverte exatamente a diferença do ajuste original.
   const diferenca = Number((-Number(original.diferenca)).toFixed(2));
+
+  // O estorno tem sentido oposto ao original, então usa a OUTRA categoria.
+  // Se ela ainda não tiver contas contábeis, a tela pede na hora, igual ao
+  // primeiro ajuste daquele sentido.
+  const categoria = await categoriaDoAjuste(tenantId, diferenca, data);
 
   return gravarAjuste({
     tenantId, userId, conta, categoria,
@@ -326,6 +422,8 @@ module.exports = {
   findOne,
   create,
   estornar,
+  garantirCategorias,
   ORIGEM_AJUSTE,
   MOTIVO_MIN,
+  CATEGORIAS_SISTEMA,
 };

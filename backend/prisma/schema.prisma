@@ -152,6 +152,11 @@ model Category {
   centroCustoC   String?  @map("centro_custo_c") @db.VarChar(20)
   flagMercadoria Boolean  @default(false) @map("flag_mercadoria")
   dfcType        String?  @default("OPERACIONAL") @map("dfc_type") @db.VarChar(20)
+  // Marca as categorias criadas e mantidas pelo sistema, como as do ajuste de
+  // saldo ('ajuste_entrada' e 'ajuste_saida'). Categoria comum fica NULL.
+  // Serve para encontrá-las sem depender do nome, que o usuário pode renomear,
+  // e para impedir que sejam excluídas ou tenham o tipo trocado.
+  codigoSistema  String?  @map("codigo_sistema") @db.VarChar(30)
   ativo          Boolean  @default(true)
   criadoEm       DateTime @default(now()) @map("criado_em")
 
@@ -163,6 +168,9 @@ model Category {
   ofxEntriesSugeridas OfxEntry[] @relation("OfxEntrySuggestedCategory")
 
   @@index([tenantId])
+  // Garante UMA categoria de cada código por empresa. Em Postgres, NULL não
+  // conflita com NULL, então as categorias comuns não são afetadas.
+  @@unique([tenantId, codigoSistema])
   @@map("categories")
 }
 
