@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Landmark, Plus, Edit2, Trash2, Check, TrendingUp,
-  TrendingDown, Wallet, Scale
+  TrendingDown, Wallet, Scale, AlertTriangle
 } from 'lucide-react';
 import api from '../../services/api';
 import useRole from '../../hooks/useRole';
@@ -28,6 +28,81 @@ const EMPTY = {
   nome: '', banco: '', agencia: '', conta: '',
   tipo: 'corrente', saldoInicial: '', dataSaldoInicial: '',
 };
+
+// ─────────────────────────────────────────────────────────────────────────
+// CONTA REPETIDA
+//
+// A mesma regra que o backend aplica (bank-accounts.service.js), repetida aqui
+// só para avisar enquanto o usuário digita, em vez de deixá-lo preencher o
+// formulário inteiro para descobrir no "Salvar" que a conta já existe.
+// Quem realmente bloqueia é o backend.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Texto comparável: sem acento, sem espaço sobrando, minúsculo. */
+function chaveTexto(v) {
+  return String(v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+/** Número comparável: só dígitos, sem zeros à esquerda ("02780" = "2780"). */
+function chaveNumero(v) {
+  return String(v || '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/**
+ * Acha, na lista já carregada, uma conta que seja na prática a mesma.
+ * Devolve { conta, motivo } ou null.
+ */
+function acharRepetida(dados, contas, ignorarId = null) {
+  const nome    = chaveTexto(dados.nome);
+  const banco   = chaveTexto(dados.banco);
+  const agencia = chaveNumero(dados.agencia);
+  const conta   = chaveNumero(dados.conta);
+
+  for (const c of contas) {
+    if (ignorarId && c.id === ignorarId) continue;
+
+    // Mesma agência + conta é a mesma conta bancária, não importa o nome.
+    if (agencia && conta &&
+        chaveNumero(c.agencia) === agencia &&
+        chaveNumero(c.conta)   === conta) {
+      const bancoExistente = chaveTexto(c.banco);
+      if (!banco || !bancoExistente || banco === bancoExistente) {
+        return { conta: c, motivo: 'agencia_conta' };
+      }
+    }
+    if (nome && chaveTexto(c.nome) === nome) return { conta: c, motivo: 'nome' };
+  }
+  return null;
+}
+
+/** Identificação curta de uma conta, para citar no aviso. */
+function resumoConta(c) {
+  return [c.banco, c.agencia && `ag. ${c.agencia}`, c.conta && `c/c ${c.conta}`]
+    .filter(Boolean).join(' · ');
+}
+
+/** Texto do aviso, igual ao que o backend devolve. */
+function avisoRepetida({ conta, motivo }) {
+  const dados = resumoConta(conta);
+  return motivo === 'agencia_conta'
+    ? `Esta conta bancária já está cadastrada como "${conta.nome}"` +
+      `${dados ? ` (${dados})` : ''}. Use a conta existente ou confira a agência e o número da conta.`
+    : `Já existe uma conta chamada "${conta.nome}". Escolha outro nome para diferenciar as duas.`;
+}
+
+/** Ids das contas já cadastradas que repetem outra da mesma lista. */
+function idsRepetidos(contas) {
+  const ids = new Set();
+  contas.forEach((c, i) => {
+    const anteriores = contas.slice(0, i);
+    const r = acharRepetida(c, anteriores);
+    if (r) { ids.add(c.id); ids.add(r.conta.id); }
+  });
+  return ids;
+}
 
 export default function ContasBancarias() {
   const { hasRole } = useRole();
@@ -79,6 +154,10 @@ export default function ContasBancarias() {
       setErro('Nome da conta é obrigatório.');
       return;
     }
+    if (repetida) {
+      setErro(avisoRepetida(repetida));
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -111,6 +190,15 @@ export default function ContasBancarias() {
 
   const totalSaldo = contas.reduce((acc, c) => acc + (c.saldoAtual || 0), 0);
 
+  // Aviso enquanto digita: a conta que está sendo cadastrada já existe?
+  const repetida = useMemo(
+    () => (modal ? acharRepetida(form, contas, editando?.id) : null),
+    [modal, form, contas, editando]
+  );
+
+  // Contas repetidas que JÁ estão no banco (cadastradas antes desta trava).
+  const repetidasExistentes = useMemo(() => idsRepetidos(contas), [contas]);
+
   return (
     <div className="space-y-5">
       {/* Cabeçalho */}
@@ -142,6 +230,25 @@ export default function ContasBancarias() {
           }`}>
             {formatCurrency(totalSaldo)}
           </p>
+        </div>
+      )}
+
+      {/* Contas repetidas que já estavam cadastradas antes desta trava.
+          O saldo total soma o mesmo dinheiro duas vezes enquanto elas existirem. */}
+      {repetidasExistentes.size > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3
+                        flex items-start gap-2.5">
+          <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-amber-800 leading-relaxed">
+            <p className="font-medium">
+              {repetidasExistentes.size} contas parecem ser a mesma conta bancária
+            </p>
+            <p className="text-[13px] mt-0.5">
+              Elas estão marcadas abaixo. Enquanto as duas existirem, o saldo total soma
+              o mesmo dinheiro duas vezes. Desative a que não for usar — os lançamentos dela
+              continuam guardados.
+            </p>
+          </div>
         </div>
       )}
 
@@ -189,10 +296,19 @@ export default function ContasBancarias() {
                     )}
                   </div>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium
-                  ${TIPO_CORES[conta.tipo]}`}>
-                  {TIPOS.find(t => t.value === conta.tipo)?.label}
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium
+                    ${TIPO_CORES[conta.tipo]}`}>
+                    {TIPOS.find(t => t.value === conta.tipo)?.label}
+                  </span>
+                  {repetidasExistentes.has(conta.id) && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium
+                                     bg-amber-100 text-amber-700 flex items-center gap-1"
+                      title="Outra conta cadastrada tem os mesmos dados">
+                      <AlertTriangle size={10} /> Repetida
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Saldo */}
@@ -374,6 +490,18 @@ export default function ContasBancarias() {
             )}
           </div>
 
+          {/* Aviso de conta repetida: aparece enquanto digita, antes de salvar. */}
+          {repetida && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3
+                            flex items-start gap-2.5">
+              <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-800 leading-relaxed">
+                <p className="font-medium">Conta bancária repetida</p>
+                <p className="text-[13px] mt-0.5">{avisoRepetida(repetida)}</p>
+              </div>
+            </div>
+          )}
+
           {erro && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm
                             px-4 py-3 rounded-lg">{erro}</div>
@@ -383,8 +511,10 @@ export default function ContasBancarias() {
             <button onClick={() => setModal(false)} className="btn-secondary flex-1">
               Cancelar
             </button>
-            <button onClick={salvar} disabled={saving}
-              className="btn-primary flex-1 flex items-center justify-center gap-2">
+            <button onClick={salvar} disabled={saving || !!repetida}
+              title={repetida ? 'Esta conta já está cadastrada' : undefined}
+              className="btn-primary flex-1 flex items-center justify-center gap-2
+                         disabled:opacity-50 disabled:cursor-not-allowed">
               {saving
                 ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 : <Check size={15} />}

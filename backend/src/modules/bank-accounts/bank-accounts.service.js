@@ -150,6 +150,80 @@ async function withSaldoAtual(tenantId, accounts) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CONTA REPETIDA
+//
+// Nada impedia cadastrar a mesma conta duas vezes: bastava digitar o nome com
+// outra caixa ("BANCO DO BRASIL" e "Banco do Brasil") e o sistema aceitava dois
+// cadastros da mesma agência/conta. O saldo total passava a somar o mesmo
+// dinheiro duas vezes, o extrato ficava partido entre os dois cadastros e a
+// importação de OFX podia cair na conta errada.
+//
+// A identidade de uma conta bancária é o par agência + conta, dentro do banco.
+// Quando esses campos não são informados (caixa, por exemplo), sobra o nome.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Texto comparável: sem acento, sem espaço sobrando, minúsculo. */
+function chaveTexto(v) {
+  return String(v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+/** Número comparável: só dígitos, sem zeros à esquerda ("02780" = "2780"). */
+function chaveNumero(v) {
+  return String(v || '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/**
+ * Procura uma conta ATIVA do tenant que seja, na prática, a mesma conta.
+ * Devolve { conta, motivo } ou null.
+ */
+async function acharRepetida(tenantId, dados, ignorarId = null) {
+  const nome    = chaveTexto(dados.nome);
+  const banco   = chaveTexto(dados.banco);
+  const agencia = chaveNumero(dados.agencia);
+  const conta   = chaveNumero(dados.conta);
+
+  const existentes = await prisma.bankAccount.findMany({
+    where: { tenantId, ativo: true, ...(ignorarId && { NOT: { id: ignorarId } }) },
+  });
+
+  for (const c of existentes) {
+    // Mesma agência + conta é a mesma conta bancária, não importa o nome.
+    // Bancos diferentes podem repetir esses números, então o banco também
+    // pesa — mas só quando os dois cadastros dizem qual é.
+    if (agencia && conta &&
+        chaveNumero(c.agencia) === agencia &&
+        chaveNumero(c.conta)   === conta) {
+      const bancoExistente = chaveTexto(c.banco);
+      if (!banco || !bancoExistente || banco === bancoExistente) {
+        return { conta: c, motivo: 'agencia_conta' };
+      }
+    }
+    // Dois cadastros com o mesmo nome ninguém consegue diferenciar na tela.
+    if (nome && chaveTexto(c.nome) === nome) return { conta: c, motivo: 'nome' };
+  }
+  return null;
+}
+
+function erroRepetida({ conta, motivo }) {
+  const dados = [
+    conta.banco,
+    conta.agencia && `ag. ${conta.agencia}`,
+    conta.conta   && `c/c ${conta.conta}`,
+  ].filter(Boolean).join(' · ');
+
+  return {
+    status: 409,
+    message: motivo === 'agencia_conta'
+      ? `Esta conta bancária já está cadastrada como "${conta.nome}"` +
+        `${dados ? ` (${dados})` : ''}. Use a conta existente ou confira a agência e o número da conta.`
+      : `Já existe uma conta chamada "${conta.nome}". Escolha outro nome para diferenciar as duas.`,
+  };
+}
+
 async function list(tenantId) {
   const accounts = await prisma.bankAccount.findMany({
     where: { tenantId, ativo: true },
@@ -169,6 +243,10 @@ async function create(tenantId, data) {
   const { nome, banco, agencia, conta, tipo, saldoInicial, dataSaldoInicial } = data;
   if (!nome) throw { status: 400, message: 'Nome obrigatório' };
   if (!tipo) throw { status: 400, message: 'Tipo obrigatório' };
+
+  const repetida = await acharRepetida(tenantId, { nome, banco, agencia, conta });
+  if (repetida) throw erroRepetida(repetida);
+
   return prisma.bankAccount.create({
     data: {
       tenantId,
@@ -215,6 +293,20 @@ async function update(id, tenantId, data) {
     }
   }
 
+  // A mesma trava do cadastro vale aqui: editar não pode transformar esta
+  // conta na cópia de outra que já existe.
+  const repetida = await acharRepetida(
+    tenantId,
+    {
+      nome:    data.nome    !== undefined ? data.nome    : atual.nome,
+      banco:   data.banco   !== undefined ? data.banco   : atual.banco,
+      agencia: data.agencia !== undefined ? data.agencia : atual.agencia,
+      conta:   data.conta   !== undefined ? data.conta   : atual.conta,
+    },
+    id
+  );
+  if (repetida) throw erroRepetida(repetida);
+
   const sanitized = {
     ...data,
     ...(data.saldoInicial !== undefined && { saldoInicial: parseFloat(data.saldoInicial || 0) }),
@@ -239,4 +331,6 @@ module.exports = {
   // Expostos para o módulo de ajuste de saldo e para o extrato, que precisam
   // da MESMA definição de saldo usada aqui.
   saldoNaData, filtroDataSaldo, STATUS_EFETIVADOS,
+  // Usados também pela importação/cadastro em lote, que precisa da mesma regra.
+  acharRepetida, chaveTexto, chaveNumero,
 };
