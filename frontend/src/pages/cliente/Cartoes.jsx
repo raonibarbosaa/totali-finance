@@ -14,7 +14,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import { formatCurrency } from '../../utils/formatters';
 
 const EMPTY = {
-  nome: '', emissor: 'generico', bandeira: '', ultimos4: '',
+  nome: '', emissor: 'auto', bandeira: '', ultimos4: '',
   limite: '', diaFechamento: '', diaVencimento: '', bankAccountId: '',
 };
 
@@ -56,7 +56,7 @@ export default function Cartoes() {
     setEditando(cartao);
     setForm(cartao ? {
       nome: cartao.nome,
-      emissor: cartao.emissor || 'generico',
+      emissor: cartao.emissor || 'auto',
       bandeira: cartao.bandeira || '',
       ultimos4: cartao.ultimos4 || '',
       limite: cartao.limite ?? '',

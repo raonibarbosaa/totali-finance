@@ -480,8 +480,12 @@ model CreditCard {
   id            String   @id @default(uuid())
   tenantId      String   @map("tenant_id")
   nome          String   @db.VarChar(100)
-  // Qual leitor de PDF usar. 'generico' quando o emissor nao tem leitor proprio.
-  emissor       String   @default("generico") @db.VarChar(30)
+  // Qual leitor de PDF usar.
+  //   'auto'     -> detecta pelo conteudo do arquivo (padrao)
+  //   'cora'     -> forca o leitor da Cora
+  //   'generico' -> forca o leitor generico, para quando o proprio leitor do
+  //                 emissor estiver errando naquele arquivo
+  emissor       String   @default("auto") @db.VarChar(30)
   bandeira      String?  @db.VarChar(20)
   ultimos4      String?  @map("ultimos_4") @db.VarChar(4)
   limite        Decimal? @db.Decimal(15, 2)
@@ -541,6 +545,10 @@ model CardStatementEntry {
   tipo            String   @db.VarChar(20)
   parcelaNumero   Int?     @map("parcela_numero")
   parcelaTotal    Int?     @map("parcela_total")
+  // Portador do cartao adicional. Fatura de cartao empresarial lista as
+  // compras agrupadas por pessoa, e saber quem gastou o que e metade do valor
+  // do controle.
+  portador        String?  @db.VarChar(120)
   // Preenchidos na Etapa 2 (de-para e geracao de lancamentos). Ja nascem aqui
   // para nao exigir outra migracao depois.
   categoryId      String?  @map("category_id")

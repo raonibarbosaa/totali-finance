@@ -311,6 +311,30 @@ function Conferencia({ f }) {
         ))}
       </div>
 
+      {/* Gasto por portador. Só aparece quando a fatura tem mais de um. */}
+      {(() => {
+        const porPortador = {};
+        for (const e of f.entries || []) {
+          if (!e.portador || ABATE(e.tipo)) continue;
+          porPortador[e.portador] = (porPortador[e.portador] || 0) + Number(e.valor);
+        }
+        const lista = Object.entries(porPortador).sort((a, b) => b[1] - a[1]);
+        if (lista.length < 2) return null;
+        return (
+          <div className="card p-5">
+            <p className="text-xs text-slate-500 mb-3">Compras por portador</p>
+            <div className="space-y-1.5">
+              {lista.map(([nome, total]) => (
+                <div key={nome} className="flex justify-between text-sm">
+                  <span className="text-slate-600">{nome}</span>
+                  <span className="font-medium text-navy-800">{formatCurrency(total)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Linhas */}
       <div className="card overflow-hidden">
         <div className="px-5 py-3 bg-navy-800 flex items-center justify-between">
@@ -327,6 +351,7 @@ function Conferencia({ f }) {
               <tr>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Data</th>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Descrição</th>
+                <th className="text-left px-4 py-2 text-slate-500 font-medium">Portador</th>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Parcela</th>
                 <th className="text-left px-4 py-2 text-slate-500 font-medium">Tipo</th>
                 <th className="text-right px-4 py-2 text-slate-500 font-medium">Valor</th>
@@ -339,6 +364,11 @@ function Conferencia({ f }) {
                   <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className="px-4 py-2 whitespace-nowrap">{dataBR(e.dataCompra)}</td>
                     <td className="px-4 py-2 text-navy-800">{e.descricao}</td>
+                    {/* Fatura empresarial agrupa por pessoa. Saber quem gastou
+                        o que é metade do valor do controle. */}
+                    <td className="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">
+                      {e.portador || '—'}
+                    </td>
                     <td className="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">
                       {e.parcelaNumero ? `${e.parcelaNumero}/${e.parcelaTotal}` : '—'}
                     </td>

@@ -91,7 +91,7 @@ async function createCard(tenantId, data = {}) {
     data: {
       tenantId,
       nome:          String(nome).trim(),
-      emissor:       emissor || 'generico',
+      emissor:       emissor || 'auto',
       bandeira:      bandeira || null,
       ultimos4:      ultimos4 || null,
       limite:        limite === undefined || limite === '' || limite === null ? null : parseFloat(limite),
@@ -118,7 +118,7 @@ async function updateCard(id, tenantId, data = {}) {
     where: { id },
     data: {
       ...(data.nome          !== undefined && { nome: String(data.nome).trim() }),
-      ...(data.emissor       !== undefined && { emissor: data.emissor || 'generico' }),
+      ...(data.emissor       !== undefined && { emissor: data.emissor || 'auto' }),
       ...(data.bandeira      !== undefined && { bandeira: data.bandeira || null }),
       ...(data.ultimos4      !== undefined && { ultimos4: data.ultimos4 || null }),
       ...(data.limite        !== undefined && { limite: data.limite === '' || data.limite === null ? null : parseFloat(data.limite) }),
@@ -258,6 +258,9 @@ async function importStatement({ tenantId, userId, creditCardId, fileBuffer, fil
         tipo:            l.tipo,
         parcelaNumero:   l.parcelaNumero,
         parcelaTotal:    l.parcelaTotal,
+        // Fatura empresarial agrupa as compras por pessoa; o leitor devolve
+        // isso e a tela mostra o gasto de cada portador.
+        portador:        l.portador ? String(l.portador).slice(0, 120) : null,
         status:          'pendente',
         hashLinha:       hashDaLinha(creditCardId, l, l.ordemNoDia),
       })),
