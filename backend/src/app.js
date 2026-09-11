@@ -64,6 +64,9 @@ app.use("/api/recurring-titles", recurringTitlesRoutes);
 
 const balanceAdjustmentsRoutes = require("./modules/balance-adjustments/balance-adjustments.routes");
 app.use("/api/balance-adjustments", balanceAdjustmentsRoutes);
+
+const creditCardsRoutes = require("./modules/credit-cards/credit-cards.routes");
+app.use("/api/credit-cards", creditCardsRoutes);
 app.use('/api/users', userRoutes);
 
 // ── Rotas Etapas 2 e 3 ────────────────────────────────

@@ -13,6 +13,7 @@ import Fornecedores from './pages/cliente/Fornecedores';
 import Clientes from './pages/cliente/Clientes';
 import AdminUsuarios from './pages/admin/Usuarios';
 import ContasBancarias from './pages/cliente/ContasBancarias';
+import Cartoes from './pages/cliente/Cartoes';
 import Categorias from './pages/cliente/Categorias';
 import PadroesOFX from './pages/cliente/PadroesOFX';
 import ConfiguracaoEmpresa from './pages/cliente/ConfiguracaoEmpresa';
@@ -21,6 +22,7 @@ import Extrato from './pages/cliente/Extrato';
 import ContasPagarReceber from './pages/ContasPagarReceber';
 import RecorrenciasFixas from './pages/RecorrenciasFixas';
 import ImportacaoOFX from './pages/ImportacaoOFX';
+import FaturaCartao from './pages/FaturaCartao';
 import IntegracaoDrive from './pages/IntegracaoDrive';
 import Conciliacao from './pages/Conciliacao';
 import DRE from './pages/DRE';
@@ -55,6 +57,8 @@ export default function App() {
           <Route path="categorias" element={<Categorias />} />
           <Route path="padroes-ofx" element={<PadroesOFX />} />
           <Route path="contas-bancarias" element={<ContasBancarias />} />
+          <Route path="cartoes" element={<Cartoes />} />
+          <Route path="faturas-cartao" element={<FaturaCartao />} />
           <Route path="configuracao" element={<ConfiguracaoEmpresa />} />
           <Route path="estoque" element={<Estoque />} />
           <Route path="relatorios/dre" element={<DRE />} />

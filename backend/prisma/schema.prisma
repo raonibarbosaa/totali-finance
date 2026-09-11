@@ -30,6 +30,9 @@ model Tenant {
   ofxEntries        OfxEntry[]
   stockAdjustments  StockAdjustment[]
   balanceAdjustments BalanceAdjustment[]
+  creditCards       CreditCard[]
+  cardStatements    CardStatement[]
+  cardStatementEntries CardStatementEntry[]
   periodClosings    PeriodClosing[]
   exportLogs        ExportLog[]
   notifications     Notification[]
@@ -61,6 +64,7 @@ model User {
   recurringCriados    RecurringTitle[] @relation("RecurringCriadoPor")
   stocksCriados       StockAdjustment[]
   ajustesSaldoCriados BalanceAdjustment[]
+  faturasImportadas   CardStatement[]
   periodsFechados     PeriodClosing[]  @relation("FechadoPor")
   periodsReabertos    PeriodClosing[]  @relation("ReabertoPor")
   exportacoes         ExportLog[]
@@ -133,6 +137,7 @@ model BankAccount {
   ofxImports   OfxImport[]
   ofxEntries   OfxEntry[]
   balanceAdjustments BalanceAdjustment[]
+  creditCards  CreditCard[]
 
   @@index([tenantId])
   @@map("bank_accounts")
@@ -166,6 +171,7 @@ model Category {
   recurringTitles RecurringTitle[]
   ofxPatterns     OfxPattern[]
   ofxEntriesSugeridas OfxEntry[] @relation("OfxEntrySuggestedCategory")
+  cardEntries     CardStatementEntry[]
 
   @@index([tenantId])
   // Garante UMA categoria de cada código por empresa. Em Postgres, NULL não
@@ -459,6 +465,105 @@ model BalanceAdjustment {
   @@map("balance_adjustments")
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CARTÃO DE CRÉDITO
+//
+// Cartão é model proprio, e nao um tipo de BankAccount. Cartao nao tem saldo,
+// tem limite e fatura. Se entrasse como conta bancaria, o dashboard e o ajuste
+// de saldo somariam o cartao ao caixa da empresa e distorceriam o saldo.
+//
+// O elo com o banco e o bankAccountId: a conta DE ONDE a fatura e paga. Assim o
+// pagamento da fatura vira lancamento normal na conta corrente e continua
+// conciliando com o OFX.
+// ─────────────────────────────────────────────────────────────────────────
+model CreditCard {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  nome          String   @db.VarChar(100)
+  // Qual leitor de PDF usar. 'generico' quando o emissor nao tem leitor proprio.
+  emissor       String   @default("generico") @db.VarChar(30)
+  bandeira      String?  @db.VarChar(20)
+  ultimos4      String?  @map("ultimos_4") @db.VarChar(4)
+  limite        Decimal? @db.Decimal(15, 2)
+  diaFechamento Int?     @map("dia_fechamento")
+  diaVencimento Int?     @map("dia_vencimento")
+  // Conta de onde a fatura e paga. Opcional: nem todo cartao tem conta fixa.
+  bankAccountId String?  @map("bank_account_id")
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now()) @map("criado_em")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+  statements  CardStatement[]
+  entries     CardStatementEntry[]
+
+  @@index([tenantId, ativo])
+  @@map("credit_cards")
+}
+
+/// Uma fatura importada. Espelha OfxImport.
+model CardStatement {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  creditCardId     String   @map("credit_card_id")
+  nomeArquivo      String?  @map("nome_arquivo") @db.VarChar(255)
+  hashArquivo      String   @map("hash_arquivo") @db.VarChar(64)
+  emissorDetectado String?  @map("emissor_detectado") @db.VarChar(30)
+  competencia      DateTime? @db.Date
+  dataVencimento   DateTime? @map("data_vencimento") @db.Date
+  // Total lido do cabecalho do PDF. Serve de CONFERENCIA: se a soma das linhas
+  // nao bater com ele, o leitor errou, e a tela mostra a diferenca.
+  valorTotalInformado Decimal? @map("valor_total_informado") @db.Decimal(15, 2)
+  totalLinhas      Int      @default(0) @map("total_linhas")
+  importadoPor     String?  @map("importado_por")
+  importadoEm      DateTime @default(now()) @map("importado_em")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  creditCard CreditCard  @relation(fields: [creditCardId], references: [id])
+  importador User?       @relation(fields: [importadoPor], references: [id])
+  entries    CardStatementEntry[]
+
+  @@unique([tenantId, hashArquivo])
+  @@index([tenantId, creditCardId])
+  @@map("card_statements")
+}
+
+/// Cada linha da fatura.
+model CardStatementEntry {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  cardStatementId String   @map("card_statement_id")
+  creditCardId    String   @map("credit_card_id")
+  dataCompra      DateTime @map("data_compra") @db.Date
+  descricao       String   @db.VarChar(500)
+  valor           Decimal  @db.Decimal(15, 2)
+  /// compra | estorno | pagamento | encargo
+  tipo            String   @db.VarChar(20)
+  parcelaNumero   Int?     @map("parcela_numero")
+  parcelaTotal    Int?     @map("parcela_total")
+  // Preenchidos na Etapa 2 (de-para e geracao de lancamentos). Ja nascem aqui
+  // para nao exigir outra migracao depois.
+  categoryId      String?  @map("category_id")
+  supplierId      String?  @map("supplier_id")
+  transactionId   String?  @map("transaction_id")
+  /// pendente | classificado | ignorado
+  status          String   @default("pendente") @db.VarChar(20)
+  // Chave de deduplicacao na reimportacao. Data + descricao + valor nao bastam:
+  // duas compras iguais no mesmo dia existem. O hash inclui a ordem da linha.
+  hashLinha       String   @map("hash_linha") @db.VarChar(64)
+  criadoEm        DateTime @default(now()) @map("criado_em")
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  cardStatement CardStatement @relation(fields: [cardStatementId], references: [id], onDelete: Cascade)
+  creditCard    CreditCard    @relation(fields: [creditCardId], references: [id])
+  category      Category?     @relation(fields: [categoryId], references: [id])
+  supplier      Supplier?     @relation(fields: [supplierId], references: [id])
+
+  @@unique([creditCardId, hashLinha])
+  @@index([tenantId, cardStatementId])
+  @@map("card_statement_entries")
+}
+
 model PeriodClosing {
   id          String    @id @default(uuid())
   tenantId    String    @map("tenant_id")
@@ -544,6 +649,7 @@ model Supplier {
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   titles       Title[]
   transactions Transaction[]
+  cardEntries  CardStatementEntry[]
 
   @@index([tenantId, ativo])
   @@index([tenantId, nome])

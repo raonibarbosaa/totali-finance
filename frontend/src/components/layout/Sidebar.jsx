@@ -44,6 +44,7 @@ const SECOES = [
     itens: [
       { to: '/app/fornecedores', icon: Truck,      label: 'Fornecedores' },
       { to: '/app/clientes',     icon: UserCircle, label: 'Clientes' },
+      { to: '/app/cartoes',      icon: CreditCard, label: 'Cartões de Crédito' },
     ],
   },
   {
@@ -54,6 +55,7 @@ const SECOES = [
       { to: '/app/contas-bancarias', icon: Landmark,   label: 'Contas Bancárias' },
       { to: '/app/extrato',          icon: BookOpen,   label: 'Extrato Bancário' },
       { to: '/app/importacao-ofx',   icon: FileUp,     label: 'Importar OFX' },
+      { to: '/app/faturas-cartao',   icon: CreditCard, label: 'Faturas de Cartão' },
       { to: '/app/integracao-drive', icon: Cloud,      label: 'Drive Automático' },
       { to: '/app/conciliacao',      icon: ListChecks, label: 'Conciliação' },
     ],
