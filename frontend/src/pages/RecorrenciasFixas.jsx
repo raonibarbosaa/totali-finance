@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import recurringTitlesService from '../services/recurringTitlesService';
 import api from '../services/api';
 import SelectComCadastro from '../components/ui/SelectComCadastro';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes de UI
@@ -51,8 +52,9 @@ function getLabels(tipoLocked) {
       emptyAction:  'Cadastrar primeira despesa fixa',
       descricaoPh:  'Ex: Aluguel da loja, Energia, Salários…',
       contatoLabel: 'Fornecedor',
-      confirmCancel: 'Cancelar esta despesa fixa?\n\nIsso para a geração de novos títulos. Os títulos já gerados continuam existindo.',
-      confirmDelete: 'Excluir esta despesa fixa?\n\nO template será apagado. Títulos já gerados não serão apagados.',
+      entidade:      'despesa fixa',
+      cancelTitle:   'Cancelar despesa fixa',
+      deleteTitle:   'Excluir despesa fixa',
     };
   }
   if (tipoLocked === 'receber') {
@@ -66,8 +68,9 @@ function getLabels(tipoLocked) {
       emptyAction:  'Cadastrar primeiro contrato',
       descricaoPh:  'Ex: Mensalidade contrato XYZ, Aluguel recebido…',
       contatoLabel: 'Cliente',
-      confirmCancel: 'Cancelar este contrato?\n\nIsso para a geração de novos títulos. Os títulos já gerados continuam existindo.',
-      confirmDelete: 'Excluir este contrato?\n\nO template será apagado. Títulos já gerados não serão apagados.',
+      entidade:      'contrato',
+      cancelTitle:   'Cancelar contrato',
+      deleteTitle:   'Excluir contrato',
     };
   }
   return {
@@ -80,8 +83,9 @@ function getLabels(tipoLocked) {
     emptyAction:  'Criar primeira recorrência',
     descricaoPh:  'Ex: Aluguel da loja, Energia, Salários…',
     contatoLabel: null, // dinâmico no form (Fornecedor/Cliente)
-    confirmCancel: 'Cancelar esta recorrência?\n\nIsso para a geração de novos títulos. Os títulos já gerados continuam existindo.',
-    confirmDelete: 'Excluir esta recorrência?\n\nO template será apagado. Títulos já gerados não serão apagados.',
+    entidade:      'recorrência',
+    cancelTitle:   'Cancelar recorrência',
+    deleteTitle:   'Excluir recorrência',
   };
 }
 
@@ -175,25 +179,12 @@ export default function RecorrenciasFixas() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleCancelar = async (id) => {
-    if (!confirm(labels.confirmCancel)) return;
-    try {
-      await recurringTitlesService.cancelar(id);
-      load();
-    } catch (e) {
-      alert(e.response?.data?.error || 'Erro ao cancelar');
-    }
-  };
+  // Cancelar e excluir abrem a mesma janela, que busca o impacto real antes de
+  // o usuário escolher o que fazer com as parcelas já geradas.
+  const [acao, setAcao] = useState({ open: false, modo: null, template: null });
 
-  const handleDelete = async (id) => {
-    if (!confirm(labels.confirmDelete)) return;
-    try {
-      await recurringTitlesService.remove(id);
-      load();
-    } catch (e) {
-      alert(e.response?.data?.error || 'Erro ao excluir');
-    }
-  };
+  const abrirCancelar = (t) => setAcao({ open: true, modo: 'cancelar', template: t });
+  const abrirExcluir  = (t) => setAcao({ open: true, modo: 'excluir',  template: t });
 
   return (
     <div className="p-6 space-y-6">
@@ -302,13 +293,13 @@ export default function RecorrenciasFixas() {
                               className="px-3 py-1 text-xs text-gray-500 hover:text-[#152740] border border-gray-200 rounded-lg">
                               Editar
                             </button>
-                            <button onClick={() => handleCancelar(t.id)}
+                            <button onClick={() => abrirCancelar(t)}
                               className="px-3 py-1 text-xs text-amber-600 hover:text-amber-700 border border-amber-200 rounded-lg">
                               Cancelar
                             </button>
                           </>
                         )}
-                        <button onClick={() => handleDelete(t.id)}
+                        <button onClick={() => abrirExcluir(t)}
                           className="px-3 py-1 text-xs text-red-400 hover:text-red-600 border border-red-100 rounded-lg">
                           Excluir
                         </button>
@@ -322,6 +313,14 @@ export default function RecorrenciasFixas() {
         )}
       </div>
 
+      {/* Modal de cancelar/excluir com escolha do que fazer com as parcelas */}
+      <AcaoRecorrenciaModal
+        acao={acao}
+        labels={labels}
+        onClose={() => setAcao({ open: false, modo: null, template: null })}
+        onDone={() => { setAcao({ open: false, modo: null, template: null }); load(); }}
+      />
+
       {/* Modal de criar/editar */}
       <RecorrenciaFormModal
         isOpen={modal.open}
@@ -332,6 +331,163 @@ export default function RecorrenciasFixas() {
         labels={labels}
       />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Modal de cancelar / excluir recorrência
+//
+// Antes, o botão Cancelar disparava um confirm() e parava por aí: as parcelas
+// já geradas ficavam na lista, e como a geração olha 6 meses pra frente,
+// sobravam várias pro usuário apagar uma por uma.
+//
+// Agora a janela busca o impacto real (quantos títulos, em que estado) e deixa
+// escolher o que fazer com os que estão em aberto.
+// ─────────────────────────────────────────────────────────────────────────
+
+function AcaoRecorrenciaModal({ acao, labels, onClose, onDone }) {
+  const { open, modo, template } = acao;
+  const [impacto, setImpacto] = useState(null);
+  const [escopo,  setEscopo]  = useState('futuros');
+  const [loading, setLoading] = useState(false);
+  const [erro,    setErro]    = useState(null);
+
+  useEffect(() => {
+    if (!open || !template) return;
+    setImpacto(null);
+    setErro(null);
+    setEscopo('futuros');
+    recurringTitlesService.impacto(template.id)
+      .then(r => {
+        const d = r.data.data;
+        setImpacto(d);
+        // "Excluir os a vencer" é a escolha mais útil, mas só pode ser o padrão
+        // quando existe algo a vencer — senão o rádio ficaria marcado e desabilitado.
+        setEscopo(d.abertosFuturos > 0 ? 'futuros' : 'nenhum');
+      })
+      .catch(e => setErro(e.response?.data?.error || 'Não foi possível carregar os títulos gerados'));
+  }, [open, template]);
+
+  if (!open || !template) return null;
+
+  const isCancelar = modo === 'cancelar';
+  const futuros    = impacto?.abertosFuturos  ?? 0;
+  const vencidos   = impacto?.abertosVencidos ?? 0;
+  const abertos    = futuros + vencidos;
+
+  // Quantos títulos a opção escolhida vai apagar.
+  const aExcluir = escopo === 'futuros' ? futuros
+                 : escopo === 'todosAbertos' ? abertos
+                 : 0;
+
+  const opcoes = [
+    {
+      value: 'nenhum',
+      label: 'Manter todos os títulos já gerados',
+      desc:  'Só para de gerar novos. Nada é apagado.',
+    },
+    {
+      value: 'futuros',
+      label: `Excluir os ${futuros} título(s) a vencer`,
+      desc:  'Apaga os que ainda não venceram. Os vencidos continuam para cobrança.',
+      disabled: futuros === 0,
+    },
+    {
+      value: 'todosAbertos',
+      label: `Excluir os ${abertos} título(s) em aberto`,
+      desc:  vencidos > 0
+        ? `Inclui os ${vencidos} já vencido(s) e não pago(s).`
+        : 'Não há títulos vencidos em aberto no momento.',
+      disabled: abertos === 0,
+    },
+  ];
+
+  const detalhes = [];
+  if (impacto) {
+    detalhes.push(
+      impacto.total === 0
+        ? 'Este item ainda não gerou nenhum título.'
+        : `Já gerou ${impacto.total} título(s): ${impacto.pagos} pago(s), ` +
+          `${abertos} em aberto (${vencidos} vencido(s) e ${futuros} a vencer).`
+    );
+  }
+  detalhes.push('Títulos já pagos ou com pagamento parcial nunca são apagados.');
+  if (!isCancelar) {
+    detalhes.push('O cadastro será apagado e não poderá ser recuperado.');
+  }
+
+  async function confirmar() {
+    setLoading(true);
+    try {
+      const fn = isCancelar ? recurringTitlesService.cancelar : recurringTitlesService.remove;
+      const r  = await fn(template.id, escopo);
+      const n  = r.data.data?.titulosExcluidos || 0;
+      onDone();
+      if (n > 0) alert(`${n} título(s) excluído(s).`);
+    } catch (e) {
+      alert(e.response?.data?.error || `Erro ao ${isCancelar ? 'cancelar' : 'excluir'}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const verbo = isCancelar ? 'Cancelar' : 'Excluir';
+
+  return (
+    <ConfirmDialog
+      open={open}
+      onClose={onClose}
+      onConfirm={confirmar}
+      loading={loading}
+      confirmDisabled={!impacto}
+      tone={isCancelar ? 'aviso' : 'perigo'}
+      title={isCancelar ? labels.cancelTitle : labels.deleteTitle}
+      mensagem={`${template.descricao} — ${fmt(template.valor)}, ${(FREQ_LABEL[template.frequencia] || template.frequencia).toLowerCase()}.`}
+      detalhes={erro ? [erro] : detalhes}
+      confirmLabel={aExcluir > 0 ? `${verbo} e excluir ${aExcluir} título(s)` : `${verbo} ${labels.entidade}`}
+    >
+      {!erro && (
+        <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+          <legend style={{ fontSize: 13, fontWeight: 600, color: '#152740', marginBottom: 8 }}>
+            O que fazer com os títulos já gerados?
+          </legend>
+
+          {!impacto ? (
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Carregando títulos gerados...</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {opcoes.map(o => (
+                <label
+                  key={o.value}
+                  style={{
+                    display: 'flex', gap: 10, alignItems: 'flex-start',
+                    padding: '10px 12px', borderRadius: 10, fontSize: 13,
+                    border: `1px solid ${escopo === o.value ? '#152740' : '#e2e8f0'}`,
+                    background: escopo === o.value ? '#f1f5f9' : '#fff',
+                    cursor: o.disabled ? 'not-allowed' : 'pointer',
+                    opacity: o.disabled ? 0.5 : 1,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="escopoExclusao"
+                    value={o.value}
+                    checked={escopo === o.value}
+                    disabled={o.disabled}
+                    onChange={() => setEscopo(o.value)}
+                    style={{ marginTop: 2, accentColor: '#152740' }}
+                  />
+                  <span>
+                    <span style={{ display: 'block', fontWeight: 500, color: '#152740' }}>{o.label}</span>
+                    <span style={{ display: 'block', color: '#64748b', marginTop: 2 }}>{o.desc}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </fieldset>
+      )}
+    </ConfirmDialog>
   );
 }
 

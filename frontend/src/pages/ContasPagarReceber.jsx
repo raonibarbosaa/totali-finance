@@ -16,6 +16,7 @@ import matchSearch from '../utils/searchMatcher';
 import { useLocation } from 'react-router-dom';
 import api from '../services/api';
 import SelectComCadastro from '../components/ui/SelectComCadastro';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 // ─── Constantes ─────────────────────────────────────────────────────────
 
@@ -51,6 +52,15 @@ export default function ContasPagarReceber() {
 
   const [modalTitulo, setModalTitulo] = useState({ open: false, editando: null });
   const [modalBaixa,  setModalBaixa]  = useState({ open: false, titulo: null });
+
+  // Seleção em lote. Set de ids, sempre limpo quando a listagem muda —
+  // seleção que sobrevive a troca de filtro é fonte clássica de exclusão
+  // acidental (o usuário marca 10, troca o mês, e apaga outra coisa).
+  const [selecionados, setSelecionados] = useState(() => new Set());
+
+  // Um único dialog de confirmação serve todas as ações destrutivas da tela.
+  const [dialog, setDialog] = useState(null);
+  const [dialogLoading, setDialogLoading] = useState(false);
 
   // Filtro client-side adicional (OR entre palavras + valor exato).
   // Aplicado depois do filtro server-side de status/datas.
@@ -88,45 +98,219 @@ export default function ContasPagarReceber() {
 
   useEffect(() => { carregar(); }, [carregar]);
 
+  // Qualquer mudança na listagem zera a seleção.
+  useEffect(() => { setSelecionados(new Set()); }, [tab, filtros, page]);
+
   function setFiltro(k, v) {
     setFiltros((f) => ({ ...f, [k]: v }));
     setPage(1);
   }
 
-  async function excluir(t) {
-    const isParcela = !!t.grupoParcelamentoId;
-    const msg = isParcela
-      ? `Este título é a parcela ${t.parcelaNumero}/${t.parcelaTotal} de um grupo. Excluir apenas esta parcela?`
-      : 'Excluir este título?';
-    if (!confirm(msg)) return;
+  // O status precisa de handler próprio: ao escolher "Vencidos", o período
+  // tem que ser limpo na MESMA atualização de estado. Se um preset como
+  // "Este mês" continuar ativo, os vencidos de meses anteriores somem e a
+  // tela parece vazia sem motivo aparente.
+  function setStatus(v) {
+    setFiltros((f) => (
+      v === 'vencido'
+        ? { ...f, status: v, dateFrom: '', dateTo: '' }
+        : { ...f, status: v }
+    ));
+    setPage(1);
+  }
+
+  // ── Seleção ──────────────────────────────────────────────────────────
+  function toggleSelecionado(id) {
+    setSelecionados((prev) => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
+  }
+
+  function toggleTodos() {
+    setSelecionados((prev) => (
+      prev.size === titulosFiltrados.length
+        ? new Set()
+        : new Set(titulosFiltrados.map((t) => t.id))
+    ));
+  }
+
+  // Títulos marcados, com o objeto completo — o dialog precisa do status e da
+  // recorrência de origem para montar o resumo de impacto.
+  const marcados = useMemo(
+    () => titulosFiltrados.filter((t) => selecionados.has(t.id)),
+    [titulosFiltrados, selecionados]
+  );
+
+  // ── Ações em lote ────────────────────────────────────────────────────
+
+  // Monta as linhas de impacto mostradas antes de confirmar.
+  function resumoImpacto(lista, statusElegiveis, verboGerundio) {
+    const elegiveis  = lista.filter((t) => statusElegiveis.includes(t.status));
+    const preservados = lista.length - elegiveis.length;
+
+    const detalhes = [
+      `${elegiveis.length} título(s) serão ${verboGerundio}.`,
+    ];
+
+    if (preservados > 0) {
+      const pagos    = lista.filter((t) => t.status === 'pago').length;
+      const parciais = lista.filter((t) => t.status === 'parcial' && !statusElegiveis.includes('parcial')).length;
+      const cancel   = lista.filter((t) => t.status === 'cancelado').length;
+      const motivos  = [
+        pagos    && `${pagos} pago(s)`,
+        parciais && `${parciais} com pagamento parcial`,
+        cancel   && `${cancel} já cancelado(s)`,
+      ].filter(Boolean).join(', ');
+      detalhes.push(`${preservados} título(s) serão preservados: ${motivos}.`);
+    }
+
+    // O aviso mais importante da tela. Excluir uma ocorrência de recorrência
+    // ATIVA não resolve nada: a geração automática recria o título na próxima
+    // vez que a lista carregar.
+    const deRecorrenciaAtiva = elegiveis.filter((t) => t.recurringTitle?.ativo).length;
+    if (deRecorrenciaAtiva > 0) {
+      detalhes.push(
+        `Atenção: ${deRecorrenciaAtiva} vem(êm) de contrato recorrente ativo e ` +
+        `serão gerados de novo. Cancele o contrato em Contratos Recorrentes ou ` +
+        `Despesas Fixas para removê-los de vez.`
+      );
+    }
+
+    return { elegiveis, detalhes };
+  }
+
+  async function executarLote(rota, campoContagem) {
+    setDialogLoading(true);
     try {
-      await api.delete(`/titles/${t.id}`);
+      const r = await api.post(rota, { ids: Array.from(selecionados) });
+      const d = r.data.data || {};
+      const preservados = d.preservados?.length || 0;
+      setSelecionados(new Set());
+      setDialog(null);
+      alert(
+        `${d[campoContagem] || 0} título(s) processado(s).` +
+        (preservados ? ` ${preservados} preservado(s).` : '')
+      );
       carregar();
     } catch (e) {
-      alert(e.response?.data?.error || 'Erro ao excluir');
+      alert(e.response?.data?.error || 'Erro na operação em lote');
+    } finally {
+      setDialogLoading(false);
     }
   }
 
-  async function excluirGrupo(grupoId) {
-    if (!confirm('Excluir TODAS as parcelas em aberto deste grupo?\nParcelas pagas/canceladas serão preservadas.')) return;
-    try {
-      const r = await api.delete(`/titles/grupo/${grupoId}`);
-      const { excluidas, preservadas } = r.data.data || {};
-      alert(`${excluidas} parcela(s) excluída(s).${preservadas ? ` ${preservadas} preservada(s).` : ''}`);
-      carregar();
-    } catch (e) {
-      alert(e.response?.data?.error || 'Erro ao excluir grupo');
-    }
+  function confirmarExclusaoLote() {
+    const { elegiveis, detalhes } = resumoImpacto(marcados, ['aberto'], 'excluídos');
+    setDialog({
+      title: 'Excluir títulos selecionados',
+      mensagem: `Você marcou ${marcados.length} título(s).`,
+      detalhes,
+      tone: 'perigo',
+      confirmLabel: `Excluir ${elegiveis.length} título(s)`,
+      confirmDisabled: elegiveis.length === 0,
+      onConfirm: () => executarLote('/titles/lote/excluir', 'excluidos'),
+    });
   }
 
-  async function cancelar(id) {
-    if (!confirm('Cancelar este título?')) return;
-    try {
-      await api.post(`/titles/${id}/cancelar`);
-      carregar();
-    } catch (e) {
-      alert(e.response?.data?.error || 'Erro ao cancelar');
+  function confirmarCancelamentoLote() {
+    const { elegiveis, detalhes } = resumoImpacto(marcados, ['aberto', 'parcial'], 'cancelados');
+    setDialog({
+      title: 'Cancelar títulos selecionados',
+      mensagem: `Você marcou ${marcados.length} título(s). Cancelar não apaga o título, só muda o status para Cancelado.`,
+      detalhes,
+      tone: 'aviso',
+      confirmLabel: `Cancelar ${elegiveis.length} título(s)`,
+      confirmDisabled: elegiveis.length === 0,
+      onConfirm: () => executarLote('/titles/lote/cancelar', 'cancelados'),
+    });
+  }
+
+  // ── Ações individuais ────────────────────────────────────────────────
+  // Todas passam pelo mesmo ConfirmDialog: o botão nomeado ("Excluir título")
+  // deixa claro o que vai acontecer, coisa que o confirm() do navegador não faz.
+
+  function excluir(t) {
+    const detalhes = [];
+    if (t.grupoParcelamentoId) {
+      detalhes.push(
+        `Este título é a parcela ${t.parcelaNumero}/${t.parcelaTotal} de um ` +
+        `parcelamento. As outras parcelas não serão afetadas.`
+      );
     }
+    if (t.recurringTitle?.ativo) {
+      detalhes.push(
+        'Vem de um contrato recorrente ativo e será gerado de novo. ' +
+        'Cancele o contrato para removê-lo de vez.'
+      );
+    }
+    setDialog({
+      title: 'Excluir título',
+      mensagem: `${t.descricao} — ${fmtMoeda(t.valor)}, vencimento ${fmtData(t.dataVencimento)}.`,
+      detalhes,
+      tone: 'perigo',
+      confirmLabel: 'Excluir título',
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          await api.delete(`/titles/${t.id}`);
+          setDialog(null);
+          carregar();
+        } catch (e) {
+          alert(e.response?.data?.error || 'Erro ao excluir');
+        } finally {
+          setDialogLoading(false);
+        }
+      },
+    });
+  }
+
+  function excluirGrupo(grupoId) {
+    setDialog({
+      title: 'Excluir parcelamento',
+      mensagem: 'Todas as parcelas em aberto deste parcelamento serão excluídas.',
+      detalhes: ['Parcelas pagas, parciais e canceladas são preservadas.'],
+      tone: 'perigo',
+      confirmLabel: 'Excluir parcelas em aberto',
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          const r = await api.delete(`/titles/grupo/${grupoId}`);
+          const { excluidas, preservadas } = r.data.data || {};
+          setDialog(null);
+          alert(`${excluidas} parcela(s) excluída(s).${preservadas ? ` ${preservadas} preservada(s).` : ''}`);
+          carregar();
+        } catch (e) {
+          alert(e.response?.data?.error || 'Erro ao excluir grupo');
+        } finally {
+          setDialogLoading(false);
+        }
+      },
+    });
+  }
+
+  function cancelar(t) {
+    setDialog({
+      title: 'Cancelar título',
+      mensagem: `${t.descricao} — ${fmtMoeda(t.valor)}, vencimento ${fmtData(t.dataVencimento)}.`,
+      detalhes: ['O título continua na lista, com status Cancelado. Nada é apagado.'],
+      tone: 'aviso',
+      confirmLabel: 'Cancelar título',
+      cancelLabel: 'Voltar',
+      onConfirm: async () => {
+        setDialogLoading(true);
+        try {
+          await api.post(`/titles/${t.id}/cancelar`);
+          setDialog(null);
+          carregar();
+        } catch (e) {
+          alert(e.response?.data?.error || 'Erro ao cancelar');
+        } finally {
+          setDialogLoading(false);
+        }
+      },
+    });
   }
 
   const isPagar = tab === 'pagar';
@@ -172,11 +356,19 @@ export default function ContasPagarReceber() {
             <div className={`text-2xl font-bold ${cores.text} mt-1`}>{fmtMoeda(blocoResumo.total)}</div>
             <div className="text-xs text-gray-500 mt-1">{blocoResumo.count} título(s)</div>
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          {/* Clicável: quem vê o valor vencido quer a lista dos vencidos. */}
+          <button
+            type="button"
+            onClick={() => setStatus('vencido')}
+            title="Ver apenas os títulos vencidos"
+            className={`text-left bg-amber-50 border rounded-xl p-4 transition-colors hover:bg-amber-100 ${
+              filtros.status === 'vencido' ? 'border-amber-500 ring-2 ring-amber-200' : 'border-amber-200'
+            }`}
+          >
             <div className="text-xs uppercase tracking-wide text-gray-600">Vencidos</div>
             <div className="text-2xl font-bold text-amber-700 mt-1">{fmtMoeda(blocoResumo.vencido)}</div>
             <div className="text-xs text-gray-500 mt-1">{blocoResumo.vencidoCount} título(s)</div>
-          </div>
+          </button>
         </div>
       )}
 
@@ -184,11 +376,12 @@ export default function ContasPagarReceber() {
       <div className="flex flex-wrap gap-2 mb-4">
         <select
           value={filtros.status}
-          onChange={(e) => setFiltro('status', e.target.value)}
+          onChange={(e) => setStatus(e.target.value)}
           className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:border-[#152740]"
         >
           <option value="">Todos</option>
           <option value="aberto">Em aberto</option>
+          <option value="vencido">Vencidos</option>
           <option value="parcial">Parcial</option>
           <option value="pago">Pagos</option>
           <option value="cancelado">Cancelados</option>
@@ -223,11 +416,55 @@ export default function ContasPagarReceber() {
         />
       </div>
 
+      {/* Barra de ações em lote — só aparece quando há seleção */}
+      {selecionados.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-3 px-4 py-3 bg-[#152740] text-white rounded-xl">
+          <span className="text-sm font-medium">
+            {selecionados.size} título(s) selecionado(s)
+          </span>
+          <button
+            onClick={() => setSelecionados(new Set())}
+            className="text-xs underline text-gray-300 hover:text-white"
+          >
+            Limpar seleção
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={confirmarCancelamentoLote}
+            className="px-3 py-1.5 text-xs font-medium bg-amber-500 hover:bg-amber-600 rounded-lg"
+          >
+            Cancelar selecionados
+          </button>
+          <button
+            onClick={confirmarExclusaoLote}
+            className="px-3 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 rounded-lg"
+          >
+            Excluir selecionados
+          </button>
+        </div>
+      )}
+
       {/* Tabela */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
+              <th className="w-10 px-3 py-3">
+                <input
+                  type="checkbox"
+                  aria-label="Selecionar todos os títulos da página"
+                  className="cursor-pointer accent-[#152740]"
+                  disabled={titulosFiltrados.length === 0}
+                  checked={titulosFiltrados.length > 0 && selecionados.size === titulosFiltrados.length}
+                  ref={(el) => {
+                    if (el) {
+                      el.indeterminate =
+                        selecionados.size > 0 && selecionados.size < titulosFiltrados.length;
+                    }
+                  }}
+                  onChange={toggleTodos}
+                />
+              </th>
               <Th>Vencimento</Th>
               <Th>Descrição</Th>
               <Th>{isPagar ? 'Fornecedor' : 'Cliente'}</Th>
@@ -239,9 +476,9 @@ export default function ContasPagarReceber() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-400">Carregando...</td></tr>
+              <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-400">Carregando...</td></tr>
             ) : titulosFiltrados.length === 0 ? (
-              <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-400">Nenhum título encontrado</td></tr>
+              <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-400">Nenhum título encontrado</td></tr>
             ) : (
               titulosFiltrados.map((t) => {
                 const vencido = isVencido(t);
@@ -249,7 +486,23 @@ export default function ContasPagarReceber() {
                   ? (t.supplier?.nome || t.nomeContato)
                   : (t.customer?.nome || t.nomeContato);
                 return (
-                  <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <tr
+                    key={t.id}
+                    className={`border-b border-gray-100 hover:bg-gray-50 ${
+                      selecionados.has(t.id) ? 'bg-blue-50' : ''
+                    }`}
+                  >
+                    {/* Habilitada até em título pago: o backend preserva e
+                        informa, então "selecionar todos" é seguro. */}
+                    <td className="w-10 px-3 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Selecionar ${t.descricao}`}
+                        className="cursor-pointer accent-[#152740]"
+                        checked={selecionados.has(t.id)}
+                        onChange={() => toggleSelecionado(t.id)}
+                      />
+                    </td>
                     <Td>
                       <span className={vencido ? 'text-red-600 font-medium' : 'text-gray-700'}>
                         {fmtData(t.dataVencimento)}
@@ -294,7 +547,7 @@ export default function ContasPagarReceber() {
                             className="text-xs text-[#152740] hover:underline mr-2"
                           >Editar</button>
                           <button
-                            onClick={() => cancelar(t.id)}
+                            onClick={() => cancelar(t)}
                             className="text-xs text-amber-600 hover:underline mr-2"
                           >Cancelar</button>
                           <button
@@ -355,6 +608,21 @@ export default function ContasPagarReceber() {
           onSaved={() => { setModalBaixa({ open: false, titulo: null }); carregar(); }}
         />
       )}
+
+      {/* Um dialog só para todas as ações destrutivas da tela. */}
+      <ConfirmDialog
+        open={!!dialog}
+        onClose={() => setDialog(null)}
+        loading={dialogLoading}
+        title={dialog?.title || ''}
+        mensagem={dialog?.mensagem}
+        detalhes={dialog?.detalhes || []}
+        tone={dialog?.tone}
+        confirmLabel={dialog?.confirmLabel}
+        cancelLabel={dialog?.cancelLabel}
+        confirmDisabled={dialog?.confirmDisabled}
+        onConfirm={() => dialog?.onConfirm?.()}
+      />
     </div>
   );
 }

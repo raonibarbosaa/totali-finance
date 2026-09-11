@@ -18,6 +18,8 @@ exports.create      = async (req, res) => { try { ok(res, await svc.create(req.t
 exports.update      = async (req, res) => { try { ok(res, await svc.update(req.params.id, req.tenantId, req.body));                 } catch(e){err(res,e);} };
 exports.remove      = async (req, res) => { try { ok(res, await svc.remove(req.params.id, req.tenantId));                           } catch(e){err(res,e);} };
 exports.removeGrupo = async (req, res) => { try { ok(res, await svc.removeGrupo(req.params.grupoId, req.tenantId));                 } catch(e){err(res,e);} };
+exports.removeLote  = async (req, res) => { try { ok(res, await svc.removeLote(req.tenantId, req.body?.ids));               } catch(e){err(res,e);} };
+exports.cancelarLote= async (req, res) => { try { ok(res, await svc.cancelarLote(req.tenantId, req.body?.ids));             } catch(e){err(res,e);} };
 exports.baixar      = async (req, res) => { try { ok(res, await svc.baixar(req.params.id, req.tenantId, req.user.id, req.body));    } catch(e){err(res,e);} };
 exports.cancelar    = async (req, res) => { try { ok(res, await svc.cancelar(req.params.id, req.tenantId));                         } catch(e){err(res,e);} };
 exports.estornar    = async (req, res) => { try { ok(res, await svc.estornar(req.params.id, req.tenantId));                         } catch(e){err(res,e);} };

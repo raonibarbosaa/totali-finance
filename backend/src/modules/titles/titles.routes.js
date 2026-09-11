@@ -25,6 +25,12 @@ router.get   ('/:id',             rGuard([1, 2, 3]),         ctrl.findOne);
 router.post  ('/',                rGuard([1, 2, 3]), pGuard, ctrl.create);
 router.put   ('/:id',             rGuard([1, 2, 3]), pGuard, ctrl.update);
 router.delete('/grupo/:grupoId',  rGuard([1, 2, 3]), pGuard, ctrl.removeGrupo);
+// Ações em lote. POST (e não DELETE) porque corpo em DELETE é mal suportado
+// por proxies — e o projeto roda atrás de nginx. Declaradas antes de /:id.
+// rGuard recebe NÚMERO: nível 2 = Operacional ou superior. As rotas acima
+// passam array por engano, o que anula a checagem (ver nota no plano).
+router.post  ('/lote/excluir',    rGuard(2),         pGuard, ctrl.removeLote);
+router.post  ('/lote/cancelar',   rGuard(2),         pGuard, ctrl.cancelarLote);
 router.delete('/:id',             rGuard([1, 2, 3]), pGuard, ctrl.remove);
 router.post  ('/:id/baixa',       rGuard([1, 2, 3]), pGuard, ctrl.baixar);
 router.post  ('/:id/cancelar',    rGuard([1]),       pGuard, ctrl.cancelar);

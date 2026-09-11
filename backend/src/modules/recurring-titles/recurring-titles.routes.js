@@ -10,6 +10,8 @@ router.use(auth, tGuard);
 // Leitura: qualquer perfil autenticado
 router.get('/',           rGuard([1, 2, 3]), ctrl.list);
 router.get('/:id',        rGuard([1, 2, 3]), ctrl.findOne);
+// Contagem das ocorrências já geradas — alimenta a janela de confirmação.
+router.get('/:id/impacto', rGuard([1, 2, 3]), ctrl.impacto);
 
 // Criação/edição: nível 2+ (decisão recorrente afeta planejamento financeiro)
 router.post('/',          rGuard([1, 2]),    ctrl.create);

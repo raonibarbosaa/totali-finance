@@ -232,32 +232,117 @@ async function update(id, tenantId, data) {
   });
 }
 
-/**
- * Cancela uma recorrência: para de gerar novas ocorrências mas mantém os
- * títulos já gerados (mesmo os ainda em aberto).
- */
-async function cancelar(id, tenantId) {
-  const r = await findOne(id, tenantId);
-  if (!r.ativo) throw { status: 400, message: 'Recorrência já cancelada' };
+// ─────────────────────────────────────────────────────────────────────────
+// Escopo de exclusão das ocorrências já geradas
+//
+// Cancelar/excluir um template não dizia nada sobre os títulos que ele já
+// criou. Como a geração é lazy e olha 6 meses pra frente, sempre sobravam
+// várias parcelas futuras em aberto pro usuário apagar uma a uma.
+//
+// Estes três escopos resolvem isso. 'nenhum' é o default, então quem chamar
+// sem o parâmetro continua tendo o comportamento antigo.
+// ─────────────────────────────────────────────────────────────────────────
 
-  return prisma.recurringTitle.update({
-    where: { id },
-    data: {
-      ativo:          false,
-      dataFimGeracao: startOfDay(new Date()),
-    },
-    include: { category: true },
-  });
+const ESCOPOS = ['nenhum', 'futuros', 'todosAbertos'];
+
+/**
+ * Monta o filtro de exclusão de ocorrências. Retorna null para 'nenhum'.
+ *
+ * Nunca inclui pago, parcial ou cancelado: título com pagamento registrado
+ * tem uma Transaction vinculada e apagá-lo deixaria o lançamento órfão.
+ */
+function filtroExclusao(escopo, recurringTitleId, tenantId) {
+  if (escopo === 'nenhum') return null;
+
+  return {
+    tenantId,
+    recurringTitleId,
+    status: 'aberto',
+    // 'futuros' corta no dia de hoje; 'todosAbertos' pega os vencidos também.
+    ...(escopo === 'futuros' && { dataVencimento: { gte: startOfDay(new Date()) } }),
+  };
+}
+
+function validarEscopo(escopo) {
+  const e = escopo || 'nenhum';
+  if (!ESCOPOS.includes(e)) {
+    throw { status: 400, message: `escopoExclusao inválido (use ${ESCOPOS.join(', ')})` };
+  }
+  return e;
 }
 
 /**
- * Apaga o template definitivamente. Os títulos já gerados ficam (vão pra
- * recurring_title_id = NULL automaticamente, por causa do ON DELETE SET NULL).
+ * Conta as ocorrências já geradas por um template, para a tela mostrar o
+ * impacto real ANTES de o usuário escolher o que fazer.
  */
-async function remove(id, tenantId) {
+async function impacto(id, tenantId) {
   await findOne(id, tenantId);
-  await prisma.recurringTitle.delete({ where: { id } });
-  return { ok: true };
+  const hoje = startOfDay(new Date());
+  const base = { tenantId, recurringTitleId: id };
+
+  const [abertosFuturos, abertosVencidos, pagos, parciais, cancelados, total] =
+    await Promise.all([
+      prisma.title.count({ where: { ...base, status: 'aberto', dataVencimento: { gte: hoje } } }),
+      prisma.title.count({ where: { ...base, status: 'aberto', dataVencimento: { lt:  hoje } } }),
+      prisma.title.count({ where: { ...base, status: 'pago'      } }),
+      prisma.title.count({ where: { ...base, status: 'parcial'   } }),
+      prisma.title.count({ where: { ...base, status: 'cancelado' } }),
+      prisma.title.count({ where: base }),
+    ]);
+
+  return { abertosFuturos, abertosVencidos, pagos, parciais, cancelados, total };
+}
+
+/**
+ * Cancela uma recorrência: para de gerar novas ocorrências e, conforme o
+ * escopo, apaga as parcelas em aberto já geradas.
+ *
+ * ORDEM IMPORTA. O update que marca ativo:false roda ANTES do deleteMany,
+ * dentro da mesma transação. Se fosse ao contrário, a próxima listagem
+ * chamaria gerarOcorrenciasPendentes() e recriaria tudo que acabou de ser
+ * apagado — o template ainda estaria ativo.
+ */
+async function cancelar(id, tenantId, escopoExclusao = 'nenhum') {
+  const r = await findOne(id, tenantId);
+  if (!r.ativo) throw { status: 400, message: 'Recorrência já cancelada' };
+
+  const escopo = validarEscopo(escopoExclusao);
+  const filtro = filtroExclusao(escopo, id, tenantId);
+
+  const [recorrencia, exclusao] = await prisma.$transaction([
+    prisma.recurringTitle.update({
+      where: { id },
+      data: {
+        ativo:          false,
+        dataFimGeracao: startOfDay(new Date()),
+      },
+      include: { category: true },
+    }),
+    ...(filtro ? [prisma.title.deleteMany({ where: filtro })] : []),
+  ]);
+
+  return { ...recorrencia, titulosExcluidos: exclusao?.count || 0 };
+}
+
+/**
+ * Apaga o template definitivamente. Os títulos que sobrarem ficam com
+ * recurring_title_id = NULL (ON DELETE SET NULL), então não são regerados.
+ *
+ * Aqui o deleteMany vem ANTES do delete do template: depois que o template
+ * some, o vínculo vira NULL e o filtro por recurringTitleId não acha mais nada.
+ */
+async function remove(id, tenantId, escopoExclusao = 'nenhum') {
+  await findOne(id, tenantId);
+
+  const escopo = validarEscopo(escopoExclusao);
+  const filtro = filtroExclusao(escopo, id, tenantId);
+
+  const [exclusao] = await prisma.$transaction([
+    ...(filtro ? [prisma.title.deleteMany({ where: filtro })] : []),
+    prisma.recurringTitle.delete({ where: { id } }),
+  ]);
+
+  return { ok: true, titulosExcluidos: filtro ? exclusao.count : 0 };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -326,6 +411,7 @@ async function gerarOcorrenciasPendentes(tenantId) {
 module.exports = {
   list,
   findOne,
+  impacto,
   create,
   update,
   cancelar,

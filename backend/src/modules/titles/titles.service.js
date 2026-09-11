@@ -14,6 +14,27 @@ const recurringSvc = require('../recurring-titles/recurring-titles.service');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
+/** Zera a hora de uma data (comparações de vencimento são por DIA). */
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+/**
+ * Primeiro dia do mês da data — chave de competência em period_closings.
+ *
+ * Usa getters UTC de propósito. dataVencimento e competencia são colunas
+ * @db.Date, e o Prisma devolve DATE como meia-noite UTC. Ler com getMonth()
+ * local jogaria a data para o dia anterior em fuso negativo (o Brasil é
+ * UTC-3), e como competencia é sempre dia 1, o mês voltaria um inteiro —
+ * agosto viraria julho e o fechamento nunca casaria.
+ */
+function competenciaDe(d) {
+  const x = new Date(d);
+  return new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1));
+}
+
 /**
  * Calcula as N parcelas a partir do valor total.
  * Trabalha em centavos para evitar erro de float; centavos de resto
@@ -88,6 +109,9 @@ const includePadrao = {
   bankAccount:  true,
   supplier:     { select: { id: true, nome: true, documento: true, tipoDocumento: true } },
   customer:     { select: { id: true, nome: true, documento: true, tipoDocumento: true } },
+  // Necessário para o frontend avisar que excluir um título de recorrência
+  // ATIVA é inútil: a geração lazy recria a ocorrência na próxima listagem.
+  recurringTitle: { select: { id: true, ativo: true, descricao: true } },
 };
 
 // ─── list / summary / findOne ────────────────────────────────────────────
@@ -111,19 +135,28 @@ async function list(tenantId, filters = {}) {
   const lim  = Math.min(parseInt(limit, 10) || 50, 200);
   const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
 
+  // "vencido" é um PSEUDO-status: não existe na coluna status do banco.
+  // Traduz para (aberto|parcial) + dataVencimento < hoje.
+  const filtroVencido = status === 'vencido';
+  const hoje = startOfDay(new Date());
+
+  // Um único objeto de intervalo combina período escolhido + corte de vencidos,
+  // para os dois filtros conviverem sem um sobrescrever o outro.
+  const vencRange = {
+    ...(dateFrom      && { gte: new Date(dateFrom) }),
+    ...(dateTo        && { lte: new Date(dateTo) }),
+    ...(filtroVencido && { lt: hoje }),
+  };
+
   const where = {
     tenantId,
     ...(tipo                && { tipo }),
-    ...(status              && { status }),
+    ...(status && !filtroVencido && { status }),
+    ...(filtroVencido       && { status: { in: ['aberto', 'parcial'] } }),
     ...(supplierId          && { supplierId }),
     ...(customerId          && { customerId }),
     ...(grupoParcelamentoId && { grupoParcelamentoId }),
-    ...((dateFrom || dateTo) && {
-      dataVencimento: {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo   && { lte: new Date(dateTo) }),
-      },
-    }),
+    ...(Object.keys(vencRange).length > 0 && { dataVencimento: vencRange }),
     ...(search && {
       OR: [
         { descricao:       { contains: search, mode: 'insensitive' } },
@@ -418,6 +451,133 @@ async function removeGrupo(grupoId, tenantId) {
   };
 }
 
+// ─── Ações em lote ───────────────────────────────────────────────────────
+//
+// Regra de ouro: NUNCA apagar título com pagamento registrado.
+//
+// `transactionId` não é uma FK no schema (é String? solto), então o banco NÃO
+// impede apagar um título pago. Só que a Transaction da baixa ficaria órfã,
+// continuando a contar em saldo, DRE e exportação pro Domínio sem título de
+// origem. Por isso a filtragem por status é feita aqui, no service.
+//
+// Em vez de derrubar a operação inteira quando há item inelegível, seguimos o
+// padrão de removeGrupo(): apaga o que pode, devolve o que preservou e o motivo.
+
+// Teto de ids por chamada. O axios do frontend tem timeout de 15s; um lote
+// muito grande estouraria o cliente antes do banco responder.
+const LOTE_MAX = 200;
+
+/**
+ * Carrega os títulos do lote e classifica cada um em elegível ou preservado.
+ * Compartilhado por removeLote e cancelarLote.
+ *
+ * @param statusElegiveis  status que a operação aceita processar
+ */
+async function classificarLote(tenantId, ids, statusElegiveis) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw { status: 400, message: 'Selecione pelo menos um título' };
+  }
+  if (ids.length > LOTE_MAX) {
+    throw { status: 400, message: `Selecione no máximo ${LOTE_MAX} títulos por vez` };
+  }
+
+  // Filtrar por tenantId é o que garante o isolamento entre empresas: ids de
+  // outra empresa simplesmente não voltam da consulta.
+  const titulos = await prisma.title.findMany({
+    where: { tenantId, id: { in: ids } },
+    select: { id: true, descricao: true, status: true, dataVencimento: true },
+  });
+
+  if (titulos.length === 0) {
+    throw { status: 404, message: 'Nenhum título encontrado' };
+  }
+
+  // Competências fechadas do tenant. O periodGuard só inspeciona
+  // dataLancamento/dataPagamento no body, então não cobre estas rotas — a
+  // validação de competência precisa morar aqui.
+  const fechamentos = await prisma.periodClosing.findMany({
+    where:  { tenantId, status: 'fechado' },
+    select: { competencia: true },
+  });
+  const competenciasFechadas = new Set(
+    fechamentos.map(f => competenciaDe(f.competencia).getTime())
+  );
+
+  const elegiveis   = [];
+  const preservados = [];
+
+  const MOTIVO_STATUS = {
+    pago:      'título pago',
+    parcial:   'pagamento parcial registrado',
+    cancelado: 'já cancelado',
+    aberto:    'em aberto',
+  };
+
+  for (const t of titulos) {
+    if (!statusElegiveis.includes(t.status)) {
+      preservados.push({
+        id: t.id,
+        descricao: t.descricao,
+        motivo: MOTIVO_STATUS[t.status] || `status ${t.status}`,
+      });
+      continue;
+    }
+
+    if (competenciasFechadas.has(competenciaDe(t.dataVencimento).getTime())) {
+      preservados.push({
+        id: t.id,
+        descricao: t.descricao,
+        motivo: 'competência fechada',
+      });
+      continue;
+    }
+
+    elegiveis.push(t);
+  }
+
+  return { elegiveis, preservados };
+}
+
+/**
+ * Exclui em lote. Só toca em títulos 'aberto' — pago, parcial e cancelado são
+ * preservados, assim como vencimento em competência fechada.
+ */
+async function removeLote(tenantId, ids) {
+  const { elegiveis, preservados } = await classificarLote(tenantId, ids, ['aberto']);
+
+  let excluidos = 0;
+  if (elegiveis.length > 0) {
+    const r = await prisma.title.deleteMany({
+      where: { tenantId, id: { in: elegiveis.map(t => t.id) } },
+    });
+    excluidos = r.count;
+  }
+
+  return { ok: true, excluidos, preservados };
+}
+
+/**
+ * Cancela em lote. Espelha as validações do cancelar() individual: aceita
+ * 'aberto' e 'parcial', recusa pago e já cancelado. Não desfaz baixa alguma —
+ * para isso existe o estornar().
+ */
+async function cancelarLote(tenantId, ids) {
+  const { elegiveis, preservados } = await classificarLote(
+    tenantId, ids, ['aberto', 'parcial']
+  );
+
+  let cancelados = 0;
+  if (elegiveis.length > 0) {
+    const r = await prisma.title.updateMany({
+      where: { tenantId, id: { in: elegiveis.map(t => t.id) } },
+      data:  { status: 'cancelado' },
+    });
+    cancelados = r.count;
+  }
+
+  return { ok: true, cancelados, preservados };
+}
+
 // ─── baixar / cancelar / estornar (preservadas da versão anterior) ───────
 
 async function baixar(id, tenantId, userId, dadosBaixa) {
@@ -550,6 +710,7 @@ async function estornar(id, tenantId) {
 module.exports = {
   list, summary, findOne,
   create, update, remove, removeGrupo,
+  removeLote, cancelarLote,
   baixar, cancelar, estornar,
   // expostos para testes
   calcularParcelas,
