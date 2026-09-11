@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Check, ChevronDown, Info } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Info } from 'lucide-react';
 import Modal from './Modal';
 import { useBankAccounts, useCategoriesGrouped } from '../../hooks/useFinanceData';
+import balanceAdjustmentsService from '../../services/balanceAdjustmentsService';
+import { formatDate } from '../../utils/formatters';
 
 const TIPOS = [
   { value: 'receita',      label: 'Receita',      cor: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
@@ -33,6 +35,23 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
   const [saving, setSaving]     = useState(false);
   const [erro, setErro]         = useState('');
   const [showDominio, setShowDominio] = useState(false);
+  // Data do último ajuste de saldo da conta escolhida, para avisar quando o
+  // lançamento cair num período que já foi acertado contra o extrato.
+  const [ultimoAjuste, setUltimoAjuste] = useState(null);
+
+  // Busca o marco de ajuste da conta selecionada.
+  useEffect(() => {
+    const conta = form.bankAccountId || form.bankAccountIdOrigem;
+    if (!open || !conta) { setUltimoAjuste(null); return; }
+    let ativo = true;
+    balanceAdjustmentsService.list(conta)
+      .then((r) => {
+        // A listagem já vem do mais recente para o mais antigo.
+        if (ativo) setUltimoAjuste(r.data.data?.[0]?.dataAjuste || null);
+      })
+      .catch(() => { if (ativo) setUltimoAjuste(null); });
+    return () => { ativo = false; };
+  }, [open, form.bankAccountId, form.bankAccountIdOrigem]);
 
   // Preenche ao editar
   useEffect(() => {
@@ -129,6 +148,12 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
   const catsFiltradas    = grupos[form.tipo] || [];
   const isTransferencia  = form.tipo === 'transferencia';
 
+  // Comparação em UTC: dataAjuste é coluna de data pura e o input entrega
+  // 'AAAA-MM-DD'. Usar Date local jogaria o dia para trás em fuso negativo.
+  const dataAntesDoAjuste = !!(ultimoAjuste && form.dataLancamento) &&
+    new Date(form.dataLancamento + 'T00:00:00Z').getTime() <
+    new Date(ultimoAjuste).setUTCHours(0, 0, 0, 0);
+
   return (
     <Modal
       open={open}
@@ -173,6 +198,18 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
             <input type="date" className="input-field"
               value={form.dataLancamento}
               onChange={e => setForm({ ...form, dataLancamento: e.target.value })} />
+
+            {/* Avisa, sem bloquear: pode haver correção legítima no passado. */}
+            {dataAntesDoAjuste && (
+              <div className="mt-1.5 flex gap-1.5 items-start text-[11px] text-amber-700">
+                <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  Esta data é anterior ao ajuste de saldo de {formatDate(ultimoAjuste)}.
+                  Aquele período já foi acertado pelo extrato, então este lançamento
+                  vai desalinhar o saldo da conta.
+                </span>
+              </div>
+            )}
           </div>
           <div>
             <label className="input-label">Valor (R$) *</label>

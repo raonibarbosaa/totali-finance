@@ -15,11 +15,20 @@
 // O ajuste é um Transaction de verdade, com origem='ajuste', mais um registro
 // nesta tabela guardando o antes, o depois e o motivo.
 //
-// O QUE O AJUSTE NÃO FAZ
-// Não entra no DRE nem no DFC. Ele representa movimentação de natureza
-// desconhecida, e lançá-lo como receita inflaria a base de imposto em Simples
-// e Presumido. O filtro fica em reports.service.js e dashboard.routes.js,
-// ancorado em origem='ajuste'.
+// O QUE O AJUSTE NÃO É
+// Não é lançamento contábil. Ele não entra no DRE, no DFC, nos cartões do
+// dashboard nem na exportação para o Domínio. Na contabilidade, o período
+// anterior ao ajuste entra pelo extrato bancário completo, com os valores do
+// banco, e não pelo que o Finance tem.
+//
+// Por isso o ajuste não tem conta de débito e crédito: ele não vira partida
+// dobrada em lugar nenhum. Todos os filtros se ancoram em origem='ajuste', em
+// reports.service.js, dashboard.routes.js e export.service.js.
+//
+// O AJUSTE COMO MARCO DE CORTE
+// Além de acertar o saldo, o ajuste marca uma data: dali para trás o Finance
+// não recebe mais movimento daquela conta. Quem usa isso é a importação de
+// OFX (ofx.service.js), através de dataCorteDaConta().
 // ─────────────────────────────────────────────────────────────────────────
 
 const prisma          = require('../../config/database');
@@ -77,13 +86,10 @@ async function exigirCompetenciaAberta(tenantId, data) {
 // O usuário não escolhe categoria: o ajuste sempre usa a mesma, e o sistema
 // decide qual pelo SENTIDO da diferença.
 //
-// São duas, e não uma, porque as contas de débito e crédito se invertem entre
-// entrada e saída. Numa entrada debita o banco e credita a contrapartida; numa
-// saída é o contrário. Com uma categoria só, metade dos ajustes sairia no
-// Domínio com as contas trocadas.
-//
-// Isso também é como o resto do sistema já funciona: cada categoria carrega um
-// par de contas fixo, e o tipo dela é que define o sentido.
+// São duas apenas para o tipo da categoria bater com o tipo do lançamento:
+// entrada é receita, saída é despesa. Elas não carregam conta contábil nenhuma,
+// porque o ajuste não vai para a contabilidade. Servem só de rótulo na lista
+// de lançamentos do Finance.
 // ─────────────────────────────────────────────────────────────────────────
 
 const CATEGORIAS_SISTEMA = {
@@ -99,14 +105,9 @@ const CATEGORIAS_SISTEMA = {
   },
 };
 
-const configurada = (cat) => !!(cat && cat.contaDebito && cat.contaCredito);
-
 /**
  * Devolve as duas categorias do ajuste, criando as que faltarem.
- *
- * Nascem SEM conta de débito e crédito: o sistema não tem como adivinhar o
- * plano de contas da empresa. A tela pede uma única vez, no primeiro ajuste
- * de cada sentido, e grava aqui.
+ * Não pedem nem guardam conta contábil: o ajuste não é lançamento contábil.
  */
 async function garantirCategorias(tenantId) {
   const encontradas = await prisma.category.findMany({
@@ -137,57 +138,31 @@ async function garantirCategorias(tenantId) {
   return resultado;
 }
 
-/**
- * Escolhe a categoria pelo sentido e garante que ela tem as contas contábeis.
- *
- * Sem conta de débito e crédito, export.service.js descarta o lançamento em
- * SILÊNCIO: o ajuste sumiria do TXT e o saldo do sistema deixaria de bater com
- * o Domínio. Por isso, quando faltam, ou a chamada traz as contas para gravar,
- * ou a operação para com um código que a tela reconhece para pedi-las.
- */
-async function categoriaDoAjuste(tenantId, diferenca, contas = {}) {
-  const sentido = diferenca > 0 ? 'entrada' : 'saida';
+/** Escolhe a categoria pelo sentido da diferença. Nada a configurar. */
+async function categoriaDoAjuste(tenantId, diferenca) {
   const cats = await garantirCategorias(tenantId);
-  let cat = cats[sentido];
-
-  const debito  = String(contas.contaDebito  || '').trim();
-  const credito = String(contas.contaCredito || '').trim();
-
-  // Primeira vez: a tela manda as contas junto e elas ficam gravadas.
-  if (!configurada(cat) && debito && credito) {
-    cat = await prisma.category.update({
-      where: { id: cat.id },
-      data: {
-        contaDebito:  debito,
-        contaCredito: credito,
-        ...(contas.codHistorico && { codHistorico: String(contas.codHistorico).trim() }),
-      },
-    });
-  }
-
-  if (!configurada(cat)) {
-    throw {
-      status: 400,
-      code:   'CATEGORIA_SEM_CONTAS',
-      sentido,
-      categoria: { id: cat.id, nome: cat.nome, tipo: cat.tipo },
-      message:
-        `Informe a conta de débito e a de crédito da categoria "${cat.nome}". ` +
-        'Elas são pedidas uma única vez e valem para os próximos ajustes deste sentido.',
-    };
-  }
-
-  return cat;
+  return cats[diferenca > 0 ? 'entrada' : 'saida'];
 }
 
-/** Snapshot das contas contábeis, no mesmo formato de transactions.service. */
-const contabilDaCategoria = (cat) => ({
-  contaDebito:  cat.contaDebito,
-  contaCredito: cat.contaCredito,
-  codHistorico: cat.codHistorico,
-  centroCustoD: cat.centroCustoD,
-  centroCustoC: cat.centroCustoC,
-});
+// ─────────────────────────────────────────────────────────────────────────
+// O ajuste como marco de corte
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Data do ajuste mais recente de uma conta, ou null se nunca houve ajuste.
+ *
+ * Quem consome é a importação de OFX: lançamentos anteriores a esta data são
+ * desconsiderados, porque aquele período já foi acertado contra o extrato e a
+ * contabilidade o recebe pelo extrato completo, não pelo Finance.
+ */
+async function dataCorteDaConta(tenantId, bankAccountId) {
+  const ultimo = await prisma.balanceAdjustment.findFirst({
+    where:   { tenantId, bankAccountId },
+    orderBy: { dataAjuste: 'desc' },
+    select:  { dataAjuste: true },
+  });
+  return ultimo ? ultimo.dataAjuste : null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Consulta
@@ -204,17 +179,17 @@ async function previa(tenantId, bankAccountId, data) {
   const { conta, saldo, receitas, despesas } =
     await bankAccountsSvc.saldoNaData(tenantId, bankAccountId, new Date(data + 'T23:59:59'));
 
-  // A tela precisa saber, ANTES de o usuário digitar o saldo real, se a
-  // categoria daquele sentido já tem contas contábeis. Assim ela mostra os
-  // campos no momento certo, em vez de deixar o erro estourar no salvar.
+  // A tela mostra qual categoria será usada, para o contador conferir onde o
+  // lançamento cai. Não há nada a configurar nelas.
   const cats = await garantirCategorias(tenantId);
-  const resumoCat = (c) => ({
-    id: c.id, nome: c.nome, tipo: c.tipo,
-    configurada: configurada(c),
-    contaDebito: c.contaDebito, contaCredito: c.contaCredito,
-  });
+  const resumoCat = (c) => ({ id: c.id, nome: c.nome, tipo: c.tipo });
+
+  // Também devolve a data do último ajuste desta conta: é o marco de corte que
+  // a importação de OFX vai respeitar, e a tela avisa quando já existe um.
+  const corte = await dataCorteDaConta(tenantId, bankAccountId);
 
   return {
+    ultimoAjuste: corte,
     bankAccount:  { id: conta.id, nome: conta.nome, banco: conta.banco },
     data,
     saldoSistema: saldo,
@@ -273,7 +248,8 @@ async function gravarAjuste({
         status:          'realizado',
         origem:          ORIGEM_AJUSTE,
         criadoPor:       userId,
-        ...contabilDaCategoria(categoria),
+        // Sem conta de débito e crédito de propósito: o ajuste não é
+        // lançamento contábil e não sai na exportação para o Domínio.
       },
     });
 
@@ -304,8 +280,6 @@ async function gravarAjuste({
  * @param data.dataLancamento  nome escolhido para o periodGuard reconhecer
  * @param data.saldoReal       saldo que consta no extrato do banco
  * @param data.motivo          obrigatório
- * @param data.contaDebito     só no primeiro ajuste de cada sentido
- * @param data.contaCredito    só no primeiro ajuste de cada sentido
  */
 async function create(tenantId, userId, data = {}) {
   const { bankAccountId, dataLancamento, saldoReal, motivo } = data;
@@ -350,7 +324,7 @@ async function create(tenantId, userId, data = {}) {
 
   // A categoria sai do SENTIDO da diferença, não de uma escolha do usuário.
   // Por isso vem depois do cálculo.
-  const categoria = await categoriaDoAjuste(tenantId, diferenca, data);
+  const categoria = await categoriaDoAjuste(tenantId, diferenca);
 
   return gravarAjuste({
     tenantId, userId, conta, categoria,
@@ -400,9 +374,7 @@ async function estornar(id, tenantId, userId, data = {}) {
   const diferenca = Number((-Number(original.diferenca)).toFixed(2));
 
   // O estorno tem sentido oposto ao original, então usa a OUTRA categoria.
-  // Se ela ainda não tiver contas contábeis, a tela pede na hora, igual ao
-  // primeiro ajuste daquele sentido.
-  const categoria = await categoriaDoAjuste(tenantId, diferenca, data);
+  const categoria = await categoriaDoAjuste(tenantId, diferenca);
 
   return gravarAjuste({
     tenantId, userId, conta, categoria,
@@ -423,6 +395,7 @@ module.exports = {
   create,
   estornar,
   garantirCategorias,
+  dataCorteDaConta,
   ORIGEM_AJUSTE,
   MOTIVO_MIN,
   CATEGORIAS_SISTEMA,

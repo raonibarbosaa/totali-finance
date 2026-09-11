@@ -5,12 +5,21 @@ const prisma = new PrismaClient();
  * Gera o arquivo TXT no layout do Domínio Contábil:
  * Data;CtoD;CtoC;Valor;Hist;Complemento;Filial;CCD;CCC
  */
+// Ajuste de saldo NUNCA sai na exportação. Ele não é lançamento contábil: é um
+// acerto interno do Finance contra o extrato. Na contabilidade, aquele período
+// entra pelo extrato bancário completo, com os valores do banco.
+//
+// O filtro vale inclusive quando vêm transactionIds explícitos, senão daria
+// para burlar pela seleção manual da tela.
+const SEM_AJUSTE = { origem: { not: 'ajuste' } };
+
 async function generateExport(tenantId, userId, { dateFrom, dateTo, transactionIds }) {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   const filialCode = tenant?.codigoFilial || '1';
 
   const where = {
     tenantId,
+    ...SEM_AJUSTE,
     ...(transactionIds?.length
       ? { id: { in: transactionIds } }
       : {
@@ -115,6 +124,7 @@ async function previewExport(tenantId, { dateFrom, dateTo }) {
   const transactions = await prisma.transaction.findMany({
     where: {
       tenantId,
+      ...SEM_AJUSTE,
       dataLancamento: {
         gte: new Date(dateFrom + 'T00:00:00'),
         lte: new Date(dateTo   + 'T23:59:59'),

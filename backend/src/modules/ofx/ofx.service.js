@@ -3,6 +3,12 @@
 const crypto = require('crypto');
 const prisma = require('../../config/database');
 const { parseOfx } = require('./ofx-parser');
+const ajustesSvc = require('../balance-adjustments/balance-adjustments.service');
+
+// Motivo gravado nas entries cortadas pelo marco de ajuste de saldo.
+// A aba Ignoradas da Conciliação mostra este texto para o usuário não achar
+// que alguém as ignorou à mão.
+const MOTIVO_CORTE = 'Anterior ao ajuste de saldo';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Importação de arquivo OFX (Etapa 5A)
@@ -49,6 +55,47 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
   // continua sendo a primeira linha de defesa contra reimport duplo.)
   const fitidsSinteticos = garantirFitidsUnicos(parsed.transactions);
 
+  // ── Marco de corte do ajuste de saldo ──────────────────────────────────
+  //
+  // Se a conta tem ajuste de saldo, tudo que for ANTERIOR à data do ajuste é
+  // desconsiderado: aquele período já foi acertado contra o extrato, e a
+  // contabilidade o recebe pelo extrato completo, não pelo Finance.
+  //
+  // A separação acontece AQUI, antes de qualquer coisa tocar o banco. Se
+  // ficasse depois do lookup de FITIDs existentes, os lançamentos antigos
+  // anteriores ao ajuste voltariam pela porta dos fundos: eles não passam pelo
+  // createMany, são movidos por updateMany com o status intacto.
+  const dataCorte = await ajustesSvc.dataCorteDaConta(tenantId, bankAccountId);
+
+  // Comparação em UTC: dataMovimento vem de parseOfxDate com Date.UTC e
+  // dataAjuste é coluna @db.Date. Misturar com getters locais erraria o dia.
+  const corteMs = dataCorte ? new Date(dataCorte).setUTCHours(0, 0, 0, 0) : null;
+  const anteriorAoCorte = (t) =>
+    corteMs !== null && new Date(t.dataMovimento).setUTCHours(0, 0, 0, 0) < corteMs;
+
+  // Só ANTES do ajuste. Lançamentos do próprio dia do ajuste são mantidos —
+  // decisão do usuário. Eles são contados à parte para a tela poder alertar
+  // sobre risco de dupla contagem.
+  const noDiaDoAjuste = corteMs === null ? 0 : parsed.transactions.filter(
+    (t) => new Date(t.dataMovimento).setUTCHours(0, 0, 0, 0) === corteMs
+  ).length;
+
+  const fitidsCortados = new Set(
+    parsed.transactions.filter(anteriorAoCorte).map((t) => t.fitid)
+  );
+
+  if (fitidsCortados.size === parsed.transactions.length && fitidsCortados.size > 0) {
+    throw {
+      status: 422,
+      code:   'TUDO_ANTES_DO_AJUSTE',
+      message:
+        'Todo o período deste arquivo é anterior ao ajuste de saldo de ' +
+        `${new Date(dataCorte).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}. ` +
+        'Nenhum lançamento seria aproveitado. Importe um extrato a partir dessa data.',
+      data: { dataCorte, totalRegistros: parsed.transactions.length },
+    };
+  }
+
   return prisma.$transaction(async (tx) => {
     const dataInicio = parsed.period.start || parsed.transactions[0].dataMovimento;
     const dataFim    = parsed.period.end   || parsed.transactions[parsed.transactions.length - 1].dataMovimento;
@@ -75,7 +122,7 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
     // abas corretas DESTA importação (ex.: já conciliados vão pra aba Conciliadas).
     const entriesExistentes = await tx.ofxEntry.findMany({
       where:  { bankAccountId, fitid: { in: fitids } },
-      select: { id: true, fitid: true },
+      select: { id: true, fitid: true, status: true },
     });
     const idsExistentes      = entriesExistentes.map((e) => e.id);
     const existingFitidsSet  = new Set(entriesExistentes.map((e) => e.fitid));
@@ -88,21 +135,52 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
       });
     }
 
-    // Apenas os FITIDs realmente novos viram entries 'pendente'.
+    // Entre as reaproveitadas, as que são anteriores ao ajuste E ainda estão
+    // pendentes passam a ignoradas.
+    //
+    // As já CONCILIADAS não são tocadas de propósito: elas viraram Transaction
+    // numa importação anterior e já estavam no saldo quando o ajuste foi
+    // calculado. Marcá-las como ignoradas não apagaria a transação e só
+    // confundiria a conferência.
+    const reaproveitadasCortadas = entriesExistentes.filter(
+      (e) => fitidsCortados.has(e.fitid) && e.status === 'pendente'
+    );
+    if (reaproveitadasCortadas.length) {
+      await tx.ofxEntry.updateMany({
+        where: { id: { in: reaproveitadasCortadas.map((e) => e.id) } },
+        data:  {
+          status:         'ignorado',
+          ignoradoEm:     new Date(),
+          motivoIgnorado: MOTIVO_CORTE,
+        },
+      });
+    }
+
+    // Apenas os FITIDs realmente novos viram entries. As anteriores ao ajuste
+    // já nascem ignoradas, e não pendentes.
+    //
+    // Nascer ignorada resolve dois pontos sem tocar em outro código: o
+    // auto-match logo abaixo só processa 'pendente', e o bulkCreateFromImport
+    // filtra por ignoradoEm nulo, então o botão "conciliar todas" também pula.
+    const agoraCorte = new Date();
     const novasEntriesData = parsed.transactions
       .filter((t) => !existingFitidsSet.has(t.fitid))
-      .map((t) => ({
-        tenantId,
-        ofxImportId:   imp.id,
-        bankAccountId,
-        fitid:         t.fitid,
-        dataMovimento: t.dataMovimento,
-        valor:         t.valor,
-        tipo:          t.tipo,
-        descricao:     truncar(t.descricao, 500),
-        memo:          truncar(t.memo, 500),
-        status:        'pendente',
-      }));
+      .map((t) => {
+        const cortada = fitidsCortados.has(t.fitid);
+        return {
+          tenantId,
+          ofxImportId:   imp.id,
+          bankAccountId,
+          fitid:         t.fitid,
+          dataMovimento: t.dataMovimento,
+          valor:         t.valor,
+          tipo:          t.tipo,
+          descricao:     truncar(t.descricao, 500),
+          memo:          truncar(t.memo, 500),
+          status:        cortada ? 'ignorado' : 'pendente',
+          ...(cortada && { ignoradoEm: agoraCorte, motivoIgnorado: MOTIVO_CORTE }),
+        };
+      });
 
     if (novasEntriesData.length) {
       await tx.ofxEntry.createMany({ data: novasEntriesData });
@@ -181,6 +259,10 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
       autoConciliados,
       conciliados:     jaConciliadasReaproveitadas,
       pendentes:       pendentesFinal,
+      // Corte pelo ajuste de saldo. dataCorte nulo = conta sem ajuste.
+      descartados:     fitidsCortados.size,
+      dataCorte:       dataCorte || null,
+      noDiaDoAjuste,
     };
   });
 }
@@ -486,7 +568,13 @@ async function ignoreEntry(entryId, tenantId) {
   });
 }
 
-/** Reverte 'ignorada' → 'pendente'. */
+/**
+ * Reverte 'ignorada' → 'pendente'.
+ *
+ * Vale também para as que o sistema cortou pelo ajuste de saldo: o motivo é
+ * limpado junto. Desfazer traz o lançamento de volta para conciliação, e ele
+ * vai desalinhar o saldo acertado — por isso a tela avisa antes.
+ */
 async function unignoreEntry(entryId, tenantId) {
   const entry = await prisma.ofxEntry.findFirst({
     where: { id: entryId, tenantId },
@@ -499,7 +587,7 @@ async function unignoreEntry(entryId, tenantId) {
   return prisma.$transaction(async (tx) => {
     const updated = await tx.ofxEntry.update({
       where: { id: entryId },
-      data:  { status: 'pendente', ignoradoEm: null },
+      data:  { status: 'pendente', ignoradoEm: null, motivoIgnorado: null },
     });
     await recalcularContadoresImport(tx, entry.ofxImportId);
     return updated;

@@ -37,6 +37,9 @@ export default function ImportacaoOFX() {
   const [file, setFile]                 = useState(null);
   const [uploading, setUploading]       = useState(false);
   const [errorMsg, setErrorMsg]         = useState('');
+  // Resumo do corte pelo ajuste de saldo. Quando preenchido, a tela para
+  // e mostra o que foi desconsiderado em vez de ir direto pra conciliação.
+  const [resumoCorte, setResumoCorte]   = useState(null);
   const [confirmDel, setConfirmDel]     = useState(null);
   const [deleting, setDeleting]         = useState(false);
 
@@ -93,10 +96,20 @@ export default function ImportacaoOFX() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      // Limpa form e navega pra conciliação do import recém-criado
+      // Limpa form
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      navigate(`/app/conciliacao?importId=${data.data.importId}`);
+
+      const d = data.data;
+
+      // Houve corte pelo ajuste de saldo: mostra o que ficou de fora antes de
+      // seguir. Ir direto pra conciliação esconderia lançamentos sumindo sem
+      // explicação. Sem corte, o fluxo segue como sempre.
+      if (d.descartados > 0 || d.noDiaDoAjuste > 0) {
+        setResumoCorte(d);
+        return;
+      }
+      navigate(`/app/conciliacao?importId=${d.importId}`);
     } catch (err) {
       const resp = err.response?.data;
       if (resp?.code === 'DUPLICATE_FILE' && resp?.data?.existingImportId) {
@@ -110,6 +123,8 @@ export default function ImportacaoOFX() {
       } else {
         setErrorMsg(resp?.error || 'Falha ao importar arquivo OFX.');
       }
+      // TUDO_ANTES_DO_AJUSTE cai no else acima: a mensagem do backend já
+      // explica a data e o que fazer.
     }
     setUploading(false);
   }
@@ -187,6 +202,59 @@ export default function ImportacaoOFX() {
           <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-lg flex gap-2 items-start">
             <AlertTriangle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
             <p className="text-xs text-red-700">{errorMsg}</p>
+          </div>
+        )}
+
+        {/* Resultado do corte pelo ajuste de saldo */}
+        {resumoCorte && (
+          <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+            <div className="flex gap-2 items-start">
+              <AlertTriangle size={15} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm font-medium text-amber-900">
+                Importação concluída com ressalvas
+              </p>
+            </div>
+
+            {resumoCorte.descartados > 0 && (
+              <p className="text-xs text-amber-900 leading-relaxed">
+                <strong>{resumoCorte.descartados} lançamento(s) foram desconsiderados</strong> por
+                terem data anterior ao ajuste de saldo de {dateOnlyBR(resumoCorte.dataCorte)}.
+                Aquele período já foi acertado contra o extrato, e a contabilidade o recebe
+                pelo extrato completo. Eles ficam na aba Ignoradas da Conciliação, caso você
+                queira conferir.
+              </p>
+            )}
+
+            {/* O corte pega só os dias ANTERIORES. Os do próprio dia do ajuste
+                passam, e podem já estar embutidos no saldo informado. */}
+            {resumoCorte.noDiaDoAjuste > 0 && (
+              <p className="text-xs text-amber-900 leading-relaxed">
+                <strong>Confira:</strong> {resumoCorte.noDiaDoAjuste} lançamento(s) são
+                do próprio dia do ajuste ({dateOnlyBR(resumoCorte.dataCorte)}) e foram
+                mantidos. Se o saldo que você informou no ajuste já incluía essas
+                movimentações, elas vão contar duas vezes. Nesse caso, ignore-as na
+                Conciliação.
+              </p>
+            )}
+
+            <p className="text-xs text-amber-800">
+              {resumoCorte.pendentes} lançamento(s) aguardando conciliação.
+            </p>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setResumoCorte(null)}
+                className="text-xs px-3 py-1.5 border border-amber-300 rounded-lg text-amber-800 hover:bg-amber-100"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => navigate(`/app/conciliacao?importId=${resumoCorte.importId}`)}
+                className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium"
+              >
+                Ir para a Conciliação
+              </button>
+            </div>
           </div>
         )}
 

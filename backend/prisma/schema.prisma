@@ -390,6 +390,9 @@ model OfxEntry {
   suggestedCategoryId String?  @map("suggested_category_id")
   conciliadoEm        DateTime? @map("conciliado_em")
   ignoradoEm          DateTime? @map("ignorado_em")
+  // Por que foi ignorada. Distingue o que o usuario ignorou a mao do que o
+  // sistema cortou por ser anterior a um ajuste de saldo da conta.
+  motivoIgnorado      String?  @map("motivo_ignorado") @db.VarChar(120)
   criadoEm            DateTime @default(now()) @map("criado_em")
 
   tenant            Tenant       @relation(fields: [tenantId], references: [id])

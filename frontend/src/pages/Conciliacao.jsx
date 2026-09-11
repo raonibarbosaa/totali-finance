@@ -558,6 +558,15 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
               {memo}
             </p>
 
+            {/* Motivo quando o SISTEMA ignorou. Sem isso, uma entrada cortada
+                pelo ajuste de saldo pareceria ignorada à mão por alguém. */}
+            {entry.status === 'ignorado' && entry.motivoIgnorado && (
+              <p className="mt-1 text-[11px] text-amber-700">
+                {entry.motivoIgnorado}. Desfazer traz o lançamento de volta e vai
+                desalinhar o saldo acertado.
+              </p>
+            )}
+
             {/* Sugestão de categoria (só pendentes) */}
             {entry.status === 'pendente' && entry.suggestedCategory && (
               <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
