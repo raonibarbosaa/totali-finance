@@ -36,9 +36,16 @@ function filtroDataSaldo(dataSaldoInicial, dataLimite) {
  *
  * @param {string} bankAccountId
  * @param {Date|string|null} dataLimite  inclui lançamentos até esta data
+ * @param {object} [opcoes]
+ * @param {string[]} [opcoes.ignorarTransactionIds]  lançamentos a deixar de fora
+ *        da soma. Quem usa é a EDIÇÃO do ajuste de saldo: para recalcular a
+ *        diferença, o saldo precisa ser o de antes do próprio ajuste existir —
+ *        senão ele se inclui na conta, o saldo bate com o extrato e a diferença
+ *        dá zero.
  * @returns {Promise<{ saldo, saldoInicial, receitas, despesas, conta }>}
  */
-async function saldoNaData(tenantId, bankAccountId, dataLimite = null) {
+async function saldoNaData(tenantId, bankAccountId, dataLimite = null, opcoes = {}) {
+  const ignorar = (opcoes.ignorarTransactionIds || []).filter(Boolean);
   const conta = await prisma.bankAccount.findFirst({
     where: { id: bankAccountId, tenantId },
   });
@@ -54,6 +61,7 @@ async function saldoNaData(tenantId, bankAccountId, dataLimite = null) {
       tipo:   { in: ['receita', 'despesa'] },
       status: { in: STATUS_EFETIVADOS },
       ...(dataFiltro && { dataLancamento: dataFiltro }),
+      ...(ignorar.length && { id: { notIn: ignorar } }),
     },
     _sum: { valor: true },
   });

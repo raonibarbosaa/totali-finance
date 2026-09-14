@@ -46,8 +46,11 @@ export default function TransactionModal({ open, onClose, onSaved, editando = nu
     let ativo = true;
     balanceAdjustmentsService.list(conta)
       .then((r) => {
-        // A listagem já vem do mais recente para o mais antigo.
-        if (ativo) setUltimoAjuste(r.data.data?.[0]?.dataAjuste || null);
+        // A listagem já vem do mais recente para o mais antigo. Ajuste
+        // cancelado não conta: o lançamento dele não existe mais, então aquele
+        // período nunca chegou a ser acertado contra o extrato.
+        const vigente = (r.data.data || []).find((a) => !a.cancelado);
+        if (ativo) setUltimoAjuste(vigente?.dataAjuste || null);
       })
       .catch(() => { if (ativo) setUltimoAjuste(null); });
     return () => { ativo = false; };

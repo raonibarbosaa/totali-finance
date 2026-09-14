@@ -44,9 +44,19 @@ const MOTIVO_MIN = 10;
 
 const fmtData = (d) => new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
+const resumoUsuario = { select: { id: true, nome: true, email: true } };
+
 const includePadrao = {
   bankAccount: { select: { id: true, nome: true, banco: true } },
-  criador:     { select: { id: true, nome: true, email: true } },
+  criador:     resumoUsuario,
+  editor:      resumoUsuario,
+  cancelador:  resumoUsuario,
+};
+
+/** Primeiro dia do mês da data, em UTC. É a chave da competência. */
+const competenciaDe = (d) => {
+  const x = new Date(d);
+  return new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1));
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -157,7 +167,9 @@ async function categoriaDoAjuste(tenantId, diferenca) {
  */
 async function dataCorteDaConta(tenantId, bankAccountId) {
   const ultimo = await prisma.balanceAdjustment.findFirst({
-    where:   { tenantId, bankAccountId },
+    // Ajuste cancelado não vale como marco: o lançamento dele não existe mais,
+    // então aquele período nunca chegou a ser acertado contra o extrato.
+    where:   { tenantId, bankAccountId, canceladoEm: null },
     orderBy: { dataAjuste: 'desc' },
     select:  { dataAjuste: true },
   });
@@ -172,12 +184,24 @@ async function dataCorteDaConta(tenantId, bankAccountId) {
  * Prévia para a tela: quanto o sistema diz que a conta tem numa data.
  * Usa a MESMA função de saldo das telas de contas e do extrato.
  */
-async function previa(tenantId, bankAccountId, data) {
+async function previa(tenantId, bankAccountId, data, ignorarAjusteId = null) {
   if (!bankAccountId) throw { status: 400, message: 'Conta bancária obrigatória' };
   if (!data)          throw { status: 400, message: 'Data obrigatória' };
 
-  const { conta, saldo, receitas, despesas } =
-    await bankAccountsSvc.saldoNaData(tenantId, bankAccountId, new Date(data + 'T23:59:59'));
+  // Ao EDITAR um ajuste, a tela pede a prévia ignorando o lançamento dele —
+  // senão o saldo já viria corrigido pelo próprio ajuste que se quer corrigir.
+  let ignorarTransactionIds = [];
+  if (ignorarAjusteId) {
+    const alvo = await prisma.balanceAdjustment.findFirst({
+      where:  { id: ignorarAjusteId, tenantId },
+      select: { transactionId: true },
+    });
+    if (alvo?.transactionId) ignorarTransactionIds = [alvo.transactionId];
+  }
+
+  const { conta, saldo, receitas, despesas } = await bankAccountsSvc.saldoNaData(
+    tenantId, bankAccountId, new Date(data + 'T23:59:59'), { ignorarTransactionIds },
+  );
 
   // A tela mostra qual categoria será usada, para o contador conferir onde o
   // lançamento cai. Não há nada a configurar nelas.
@@ -199,13 +223,70 @@ async function previa(tenantId, bankAccountId, data) {
   };
 }
 
+/**
+ * Diz, para cada ajuste, que botões o painel pode oferecer.
+ *
+ * A tela não tem como saber sozinha se a competência está fechada nem se um
+ * ajuste já foi estornado, e essas duas coisas mudam completamente o que se
+ * pode fazer com ele. Então quem decide é o backend, aqui, num lugar só —
+ * as mesmas regras são repetidas como validação em atualizar() e cancelar(),
+ * porque botão escondido não é segurança.
+ *
+ * Enquanto a competência está aberta, o caminho é corrigir de frente: editar
+ * ou cancelar. Depois de fechada, o único caminho é o estorno, que lança com a
+ * data de hoje e não toca no mês fechado.
+ */
+async function decorarAcoes(tenantId, ajustes) {
+  if (ajustes.length === 0) return [];
+
+  const competencias = [...new Set(
+    ajustes.map((a) => competenciaDe(a.dataAjuste).toISOString()),
+  )].map((iso) => new Date(iso));
+
+  const fechadas = await prisma.periodClosing.findMany({
+    where: { tenantId, competencia: { in: competencias }, status: 'fechado' },
+    select: { competencia: true },
+  });
+  const fechada = new Set(fechadas.map((f) => competenciaDe(f.competencia).getTime()));
+
+  // Estornos ATIVOS (os cancelados não contam) apontando para estes ajustes.
+  const estornos = await prisma.balanceAdjustment.findMany({
+    where:  { tenantId, canceladoEm: null, estornoDe: { in: ajustes.map((a) => a.id) } },
+    select: { estornoDe: true },
+  });
+  const temEstorno = new Set(estornos.map((e) => e.estornoDe));
+
+  return ajustes.map((a) => {
+    const cancelado         = !!a.canceladoEm;
+    const estornado         = temEstorno.has(a.id);
+    const ehEstorno         = !!a.estornoDe;
+    const mesFechado        = fechada.has(competenciaDe(a.dataAjuste).getTime());
+    const intocavel         = cancelado || estornado;
+
+    return {
+      ...a,
+      cancelado,
+      estornado,
+      competenciaFechada: mesFechado,
+      acoes: {
+        // Estorno não se edita: ele é o espelho de outro ajuste, e mexer no
+        // valor dele desfaria o par.
+        editar:   !intocavel && !ehEstorno && !mesFechado,
+        cancelar: !intocavel && !mesFechado,
+        estornar: !intocavel && !ehEstorno && mesFechado,
+      },
+    };
+  });
+}
+
 async function list(tenantId, filters = {}) {
   const { bankAccountId } = filters;
-  return prisma.balanceAdjustment.findMany({
+  const ajustes = await prisma.balanceAdjustment.findMany({
     where: { tenantId, ...(bankAccountId && { bankAccountId }) },
     include: includePadrao,
     orderBy: [{ dataAjuste: 'desc' }, { criadoEm: 'desc' }],
   });
+  return decorarAcoes(tenantId, ajustes);
 }
 
 async function findOne(id, tenantId) {
@@ -214,7 +295,8 @@ async function findOne(id, tenantId) {
     include: includePadrao,
   });
   if (!r) throw { status: 404, message: 'Ajuste não encontrado' };
-  return r;
+  const [decorado] = await decorarAcoes(tenantId, [r]);
+  return decorado;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -350,11 +432,10 @@ async function estornar(id, tenantId, userId, data = {}) {
   if (original.estornoDe) {
     throw { status: 400, message: 'Este lançamento já é um estorno e não pode ser estornado de novo' };
   }
-
-  const jaEstornado = await prisma.balanceAdjustment.findFirst({
-    where: { tenantId, estornoDe: id },
-  });
-  if (jaEstornado) throw { status: 400, message: 'Este ajuste já foi estornado' };
+  if (original.cancelado) {
+    throw { status: 400, message: 'Este ajuste foi cancelado. Não há lançamento para estornar.' };
+  }
+  if (original.estornado) throw { status: 400, message: 'Este ajuste já foi estornado' };
 
   const justificativa = String(data.motivo || '').trim();
   if (justificativa.length < MOTIVO_MIN) {
@@ -388,11 +469,203 @@ async function estornar(id, tenantId, userId, data = {}) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Edição
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 'YYYY-MM-DD' de uma data guardada como @db.Date. */
+const isoDe = (d) => new Date(d).toISOString().slice(0, 10);
+
+/**
+ * Corrige data, saldo real e motivo de um ajuste já feito.
+ *
+ * O que o usuário informa continua sendo o SALDO DO EXTRATO. A diferença é
+ * sempre recalculada — inclusive quando só a data muda, porque o saldo do
+ * sistema naquele outro dia é outro.
+ *
+ * O lançamento é o mesmo: ele muda de valor, de data e, se o sentido inverter,
+ * de tipo e de categoria. Não se cria um segundo lançamento, senão a conta
+ * teria os dois somando no saldo.
+ *
+ * A versão anterior vai para revisoes, para o painel poder mostrar depois por
+ * que o saldo daquele mês mudou.
+ */
+async function atualizar(id, tenantId, userId, data = {}) {
+  const original = await findOne(id, tenantId);
+
+  if (original.cancelado) {
+    throw { status: 400, message: 'Este ajuste foi cancelado e não pode mais ser editado.' };
+  }
+  if (original.estornado) {
+    throw {
+      status: 400,
+      message: 'Este ajuste já foi estornado. Para alterá-lo, cancele antes o estorno.',
+    };
+  }
+  if (original.estornoDe) {
+    throw {
+      status: 400,
+      message: 'Estorno não se edita: ele espelha outro ajuste. Cancele o estorno e refaça.',
+    };
+  }
+
+  const novaDataISO = data.dataLancamento || isoDe(original.dataAjuste);
+  const dataAjuste  = new Date(novaDataISO);
+  if (isNaN(dataAjuste.getTime())) throw { status: 400, message: 'Data do ajuste inválida' };
+
+  const saldoInformado = Number(
+    data.saldoReal === undefined || data.saldoReal === null || data.saldoReal === ''
+      ? original.saldoReal
+      : data.saldoReal,
+  );
+  if (!Number.isFinite(saldoInformado)) throw { status: 400, message: 'Saldo real inválido' };
+
+  const justificativa = String(
+    data.motivo === undefined ? original.motivo : (data.motivo || ''),
+  ).trim();
+  if (justificativa.length < MOTIVO_MIN) {
+    throw {
+      status: 400,
+      message: `Explique o motivo do ajuste com pelo menos ${MOTIVO_MIN} caracteres.`,
+    };
+  }
+
+  // Os DOIS meses precisam estar abertos: o de onde o ajuste sai e o de onde
+  // ele passa a valer. Mexer num mês fechado por tabela é o que o estorno evita.
+  await exigirCompetenciaAberta(tenantId, original.dataAjuste);
+  await exigirCompetenciaAberta(tenantId, novaDataISO);
+
+  // Sem ignorar o próprio lançamento, o saldo do sistema já viria corrigido
+  // pelo ajuste antigo e a diferença daria zero.
+  const fimDoDia = new Date(novaDataISO + 'T23:59:59');
+  const { conta, saldo: saldoSistema } = await bankAccountsSvc.saldoNaData(
+    tenantId, original.bankAccountId, fimDoDia,
+    { ignorarTransactionIds: [original.transactionId] },
+  );
+
+  const diferenca = Number((saldoInformado - saldoSistema).toFixed(2));
+  if (diferenca === 0) {
+    throw {
+      status: 400,
+      message: 'Sem o ajuste, o saldo do sistema nessa data já é igual ao saldo informado. ' +
+               'Nesse caso o ajuste não é mais necessário: cancele-o.',
+    };
+  }
+
+  const categoria = await categoriaDoAjuste(tenantId, diferenca);
+  const tipo      = diferenca > 0 ? 'receita' : 'despesa';
+  const editor    = await prisma.user.findUnique({
+    where: { id: userId }, select: { id: true, nome: true },
+  });
+
+  // Foto do que estava valendo até agora.
+  const revisao = {
+    dataAjuste:   isoDe(original.dataAjuste),
+    saldoSistema: Number(original.saldoSistema),
+    saldoReal:    Number(original.saldoReal),
+    diferenca:    Number(original.diferenca),
+    motivo:       original.motivo,
+    substituidoEm:   new Date().toISOString(),
+    substituidoPor:  editor ? { id: editor.id, nome: editor.nome } : null,
+  };
+  const revisoes = [...(Array.isArray(original.revisoes) ? original.revisoes : []), revisao];
+
+  return prisma.$transaction(async (tx) => {
+    if (original.transactionId) {
+      await tx.transaction.update({
+        where: { id: original.transactionId },
+        data: {
+          tipo,
+          valor:           Math.abs(diferenca),
+          dataLancamento:  dataAjuste,
+          dataCompetencia: dataAjuste,
+          categoryId:      categoria.id,
+          descricao:       `Ajuste de saldo em ${fmtData(dataAjuste)}`,
+          complemento:     justificativa,
+        },
+      });
+    }
+
+    return tx.balanceAdjustment.update({
+      where: { id },
+      data: {
+        dataAjuste,
+        saldoSistema,
+        saldoReal: saldoInformado,
+        diferenca,
+        motivo: justificativa,
+        revisoes,
+        editadoEm:  new Date(),
+        editadoPor: userId,
+      },
+      include: includePadrao,
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Cancelamento
+//
+// Apaga o LANÇAMENTO — o saldo volta na hora a ser o que era antes do ajuste —
+// e mantém a LINHA no painel, marcada como cancelada, com quem cancelou e por
+// quê. O ponto do recurso é auditar correções de saldo; apagar o registro
+// inteiro apagaria justamente a auditoria.
+//
+// Só vale enquanto a competência está aberta. Com o mês fechado, o caminho é
+// o estorno.
+// ─────────────────────────────────────────────────────────────────────────
+
+async function cancelar(id, tenantId, userId, data = {}) {
+  const original = await findOne(id, tenantId);
+
+  if (original.cancelado) throw { status: 400, message: 'Este ajuste já está cancelado' };
+  if (original.estornado) {
+    throw {
+      status: 400,
+      message: 'Este ajuste já foi estornado. Cancele antes o estorno, senão o estorno ' +
+               'ficaria sozinho, mexendo no saldo sem nada para reverter.',
+    };
+  }
+
+  const justificativa = String(data.motivo || '').trim();
+  if (justificativa.length < MOTIVO_MIN) {
+    throw {
+      status: 400,
+      message: `Explique o motivo do cancelamento com pelo menos ${MOTIVO_MIN} caracteres.`,
+    };
+  }
+
+  await exigirCompetenciaAberta(tenantId, original.dataAjuste);
+
+  return prisma.$transaction(async (tx) => {
+    if (original.transactionId) {
+      // origem no filtro para nunca apagar, por um id errado, um lançamento
+      // que não seja o do próprio ajuste.
+      await tx.transaction.deleteMany({
+        where: { id: original.transactionId, tenantId, origem: ORIGEM_AJUSTE },
+      });
+    }
+
+    return tx.balanceAdjustment.update({
+      where: { id },
+      data: {
+        transactionId:      null,
+        canceladoEm:        new Date(),
+        canceladoPor:       userId,
+        motivoCancelamento: justificativa,
+      },
+      include: includePadrao,
+    });
+  });
+}
+
 module.exports = {
   previa,
   list,
   findOne,
   create,
+  atualizar,
+  cancelar,
   estornar,
   garantirCategorias,
   dataCorteDaConta,
