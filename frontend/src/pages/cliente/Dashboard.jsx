@@ -1,12 +1,20 @@
 import { useState, useEffect } from 'react';
 import {
   TrendingUp, TrendingDown, Wallet, AlertCircle, AlertTriangle,
-  ArrowUpRight, ArrowDownRight, Clock, CheckCircle2, Users, Activity
+  ArrowUpRight, ArrowDownRight, Clock, CheckCircle2, Users, Activity, Landmark
 } from 'lucide-react';
 import api from '../../services/api';
 import useAuthStore from '../../store/authStore';
 import useRole from '../../hooks/useRole';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+
+// Mesmos rótulos da tela de Contas Bancárias.
+const TIPO_CONTA = {
+  corrente: 'Conta Corrente',
+  poupanca: 'Poupança',
+  caixa:    'Caixa',
+  outro:    'Outro',
+};
 
 function StatCard({ label, value, icon: Icon, color, trend, trendLabel }) {
   return (
@@ -137,6 +145,88 @@ function SemCategoriaAlert({ data }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Saldo por conta — abre o número do card "Saldo disponível".
+//
+// O card sozinho não diz onde o dinheiro está, e é isso que se precisa saber
+// para pagar uma conta. Aqui cada conta aparece com seu saldo; as que não
+// entram no disponível (poupança, por exemplo) vêm separadas, para a soma da
+// lista bater com o card.
+// ─────────────────────────────────────────────────────────────────────────────
+function SaldoPorConta({ contas = [], total, loading }) {
+  if (loading) {
+    return (
+      <div className="card p-5 space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-8 bg-slate-50 rounded animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (contas.length === 0) return null;
+
+  const disponiveis = contas.filter((c) => c.entraNoDisponivel);
+  const outras      = contas.filter((c) => !c.entraNoDisponivel);
+
+  const Linha = ({ conta }) => (
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-slate-50 last:border-0">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="w-8 h-8 rounded-lg bg-navy-50 flex items-center justify-center flex-shrink-0">
+          <Landmark size={14} className="text-navy-600" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm text-slate-700 truncate">{conta.nome}</p>
+          <p className="text-[11px] text-slate-400 truncate">
+            {conta.banco || TIPO_CONTA[conta.tipo] || conta.tipo}
+            {conta.banco && ` · ${TIPO_CONTA[conta.tipo] || conta.tipo}`}
+          </p>
+        </div>
+      </div>
+      <span className={`text-sm font-medium flex-shrink-0 ${
+        conta.saldoAtual < 0 ? 'text-red-500' : 'text-navy-800'
+      }`}>
+        {formatCurrency(conta.saldoAtual)}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="flex items-center gap-2">
+          <Wallet size={16} className="text-navy-600" />
+          <h3 className="font-display font-semibold text-navy-800 text-sm">
+            Saldo por conta
+          </h3>
+        </div>
+        <a href="/app/contas-bancarias"
+           className="text-xs text-navy-600 hover:text-navy-800 font-medium">
+          Ver contas →
+        </a>
+      </div>
+
+      <div className="card-body py-1">
+        {disponiveis.map((c) => <Linha key={c.id} conta={c} />)}
+
+        <div className="flex items-center justify-between gap-3 py-2.5 border-t border-slate-100 mt-1">
+          <span className="text-xs text-slate-500">Saldo disponível</span>
+          <span className="text-sm font-semibold text-navy-800">{formatCurrency(total || 0)}</span>
+        </div>
+
+        {outras.length > 0 && (
+          <div className="pt-1">
+            <p className="text-[11px] text-slate-400 pt-2 pb-1">
+              Não entram no saldo disponível
+            </p>
+            {outras.map((c) => <Linha key={c.id} conta={c} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardCliente() {
   const { tenant } = useAuthStore();
   const { hasRole } = useRole();
@@ -158,6 +248,7 @@ export default function DashboardCliente() {
           despesasMes: raw.despesas || 0,
           distribuicaoLucros: raw.distribuicaoLucros || 0,
           saldoTotal: raw.saldoTotal || 0,
+          contas: raw.contas || [],
           titulosAVencer: raw.titulosVencer || 0,
           categorias: raw.categorias || { receitas: [], despesas: [] },
         } : null);
@@ -236,6 +327,15 @@ export default function DashboardCliente() {
             </>
           )}
         </div>
+      )}
+
+      {/* Saldo conta a conta, abrindo o card "Saldo disponível" */}
+      {hasRole(2) && (
+        <SaldoPorConta
+          contas={stats?.contas}
+          total={stats?.saldoTotal}
+          loading={loading}
+        />
       )}
 
       {/* Alerta: lançamentos sem categoria — só nível 2+ */}

@@ -148,6 +148,17 @@ router.get('/stats', rGuard([1, 2, 3]), async (req, res) => {
         resultado: Number(receitas._sum.valor || 0) - Number(despesas._sum.valor || 0),
         titulosVencer: titulos,
         saldoTotal: saldoDisponivel,
+        // Saldo conta a conta, para o dashboard abrir o total. Vão todas as
+        // contas ativas, e cada uma diz se entra no disponível — poupança fica
+        // de fora da soma, mas precisa aparecer: ela existe e tem dinheiro.
+        contas: contasComSaldo.map((c) => ({
+          id:                c.id,
+          nome:              c.nome,
+          banco:             c.banco,
+          tipo:              c.tipo,
+          saldoAtual:        Number(c.saldoAtual || 0),
+          entraNoDisponivel: TIPOS_DISPONIVEIS.includes(c.tipo),
+        })),
         categorias: {
           receitas: formatGrupo('receita'),
           despesas: formatGrupo('despesa'),
