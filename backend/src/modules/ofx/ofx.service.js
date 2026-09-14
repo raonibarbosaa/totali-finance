@@ -267,31 +267,65 @@ async function importFile({ tenantId, userId, bankAccountId, fileBuffer, fileNam
   });
 }
 
-async function aplicarSugestoesCategoria(tx, tenantId, ofxImportId) {
-  const padroes = await tx.ofxPattern.findMany({
+/**
+ * Recalcula a sugestao de categoria das linhas PENDENTES a partir dos padroes
+ * OFX vigentes.
+ *
+ * A sugestao nasceu como algo gravado so na hora de importar. Isso furava o
+ * fluxo natural de trabalho: o usuario ve uma linha sem sugestao, cria o padrao
+ * ali na tela de conciliacao, e a linha continuava sem sugestao no banco — a
+ * tela mostrava "Padrao ativo" mas a conciliacao em massa criava o lancamento
+ * sem categoria. Por isso a funcao roda tambem quando um padrao e criado,
+ * alterado ou removido.
+ *
+ * Recalcula TODAS as pendentes, nao so as sem sugestao: ao mudar o texto ou a
+ * categoria de um padrao, a sugestao antiga precisa sair. Linha que nao casa
+ * com padrao nenhum fica sem sugestao, que e a verdade daquele momento.
+ *
+ * Nao toca em linha ja conciliada nem ignorada: o lancamento delas ja existe.
+ *
+ * @param {object} [opcoes]
+ * @param {string} [opcoes.ofxImportId]  limita a uma importacao
+ * @param {object} [opcoes.client]       transacao do Prisma, quando dentro de uma
+ * @returns {Promise<number>} quantas linhas mudaram de sugestao
+ */
+async function reaplicarSugestoes(tenantId, opcoes = {}) {
+  const { ofxImportId = null, client = prisma } = opcoes;
+
+  const padroes = await client.ofxPattern.findMany({
     where:  { tenantId, ativo: true },
     select: { textoHistorico: true, categoryId: true },
   });
-  if (!padroes.length) return;
 
-  const entries = await tx.ofxEntry.findMany({
-    where:  { ofxImportId, status: 'pendente', suggestedCategoryId: null },
-    select: { id: true, descricao: true, memo: true },
+  const entries = await client.ofxEntry.findMany({
+    where:  { tenantId, status: 'pendente', ...(ofxImportId && { ofxImportId }) },
+    select: { id: true, descricao: true, memo: true, suggestedCategoryId: true },
   });
+
+  let atualizadas = 0;
 
   for (const e of entries) {
     const texto = `${e.descricao || ''} ${e.memo || ''}`.toUpperCase();
-    if (!texto.trim()) continue;
-    const match = padroes.find(
-      (p) => p.textoHistorico && texto.includes(p.textoHistorico.toUpperCase())
-    );
-    if (match && match.categoryId) {
-      await tx.ofxEntry.update({
-        where: { id: e.id },
-        data:  { suggestedCategoryId: match.categoryId },
-      });
-    }
+    const match = texto.trim()
+      ? padroes.find((p) => p.textoHistorico && texto.includes(p.textoHistorico.toUpperCase()))
+      : null;
+
+    const nova = match?.categoryId || null;
+    if (nova === e.suggestedCategoryId) continue;
+
+    await client.ofxEntry.update({
+      where: { id: e.id },
+      data:  { suggestedCategoryId: nova },
+    });
+    atualizadas += 1;
   }
+
+  return atualizadas;
+}
+
+/** Mesma coisa, na importacao, dentro da transacao que criou as entries. */
+async function aplicarSugestoesCategoria(tx, tenantId, ofxImportId) {
+  return reaplicarSugestoes(tenantId, { ofxImportId, client: tx });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,15 +374,26 @@ async function findImport(id, tenantId) {
   return imp;
 }
 
+/**
+ * Lista as linhas de uma importacao.
+ *
+ * status aceita, alem de pendente/conciliado/ignorado, o valor 'sem_sugestao':
+ * as pendentes que nenhum padrao OFX alcanca. E por onde se ataca o que falta
+ * padronizar, sem sair da tela de conciliacao.
+ */
 async function listEntries(importId, tenantId, filters = {}) {
   const imp = await findImport(importId, tenantId);
   const { status } = filters;
+
+  const filtroStatus = status === 'sem_sugestao'
+    ? { status: 'pendente', suggestedCategoryId: null }
+    : (status ? { status } : {});
 
   const entries = await prisma.ofxEntry.findMany({
     where: {
       ofxImportId: importId,
       tenantId,
-      ...(status && { status }),
+      ...filtroStatus,
     },
     include: {
       transaction: {
@@ -369,6 +414,13 @@ async function listEntries(importId, tenantId, filters = {}) {
   });
   const summary = { pendente: 0, conciliado: 0, ignorado: 0 };
   for (const c of counts) summary[c.status] = c._count._all;
+
+  // Quantas pendentes nenhum padrao alcanca. A tela usa para a aba
+  // "Sem sugestao" e para dizer quantas ficam de fora da conciliacao em massa.
+  summary.semSugestao = await prisma.ofxEntry.count({
+    where: { ofxImportId: importId, tenantId, status: 'pendente', suggestedCategoryId: null },
+  });
+  summary.comSugestao = summary.pendente - summary.semSugestao;
 
   return { import: imp, entries, summary };
 }
@@ -831,18 +883,39 @@ function formatDateBR(date) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Criação em massa de lançamentos a partir de um import (Etapa 5C)
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Cria de uma vez os lancamentos das pendencias da importacao.
+ *
+ * So entram as linhas COM sugestao de categoria. Lancamento sem categoria nao
+ * serve para a contabilidade e passaria batido no meio de dezenas: o que nao
+ * tem padrao fica na aba "Sem sugestao" para o usuario resolver de frente,
+ * criando o padrao ou lancando um a um.
+ *
+ * Antes de criar, as sugestoes sao recalculadas: padrao criado DEPOIS da
+ * importacao passa a valer aqui tambem.
+ */
 async function bulkCreateFromImport(importId, tenantId, userId) {
+  await reaplicarSugestoes(tenantId, { ofxImportId: importId });
+
   const entries = await prisma.ofxEntry.findMany({
     where:  {
       ofxImportId:   importId,
       tenantId,
       transactionId: null,
       ignoradoEm:    null,
+      suggestedCategoryId: { not: null },
     },
     select: { id: true },
   });
 
-  if (!entries.length) return { created: 0, errors: 0, errorList: [] };
+  const semSugestao = await prisma.ofxEntry.count({
+    where: {
+      ofxImportId: importId, tenantId, transactionId: null,
+      ignoradoEm: null, suggestedCategoryId: null,
+    },
+  });
+
+  if (!entries.length) return { created: 0, errors: 0, errorList: [], semSugestao };
 
   let created = 0;
   let errors  = 0;
@@ -858,7 +931,7 @@ async function bulkCreateFromImport(importId, tenantId, userId) {
     }
   }
 
-  return { created, errors, errorList };
+  return { created, errors, errorList, semSugestao };
 }
 
 module.exports = {
@@ -874,4 +947,7 @@ module.exports = {
   ignoreEntry,
   unignoreEntry,
   matchCandidates,
-  quickCreateFromEntry, bulkCreateFromImport };
+  quickCreateFromEntry, bulkCreateFromImport,
+  // Usado pelo modulo de padroes OFX, para o padrao valer nas linhas que ja
+  // estao esperando conciliacao.
+  reaplicarSugestoes };

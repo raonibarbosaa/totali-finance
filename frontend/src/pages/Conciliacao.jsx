@@ -188,6 +188,8 @@ function TelaConciliacao({ importId, onVoltar }) {
   const [quickCreateEntry, setQuickCreateEntry] = useState(null);
   const [unlinkConfirm, setUnlinkConfirm]       = useState(null);
   const [patternEntry, setPatternEntry]         = useState(null);
+  // Quantas linhas pendentes ganharam sugestão quando o último padrão foi salvo.
+  const [padraoResult, setPadraoResult]         = useState(null);
   const [padroes, setPadroes]                   = useState([]);
 
   const carregar = useCallback(async () => {
@@ -264,10 +266,14 @@ function TelaConciliacao({ importId, onVoltar }) {
   }
 
   async function bulkConciliarPendentes() {
-    if (!summary?.pendente) return;
+    if (!summary?.comSugestao) return;
+    const fora = summary.semSugestao || 0;
     const ok = window.confirm(
-      `Criar ${summary.pendente} lançamento(s) a partir das pendências?\n\n` +
-      `Cada entry virará um lançamento conciliado, usando a categoria sugerida (ou "sem categoria"). ` +
+      `Criar ${summary.comSugestao} lançamento(s) a partir das pendências com categoria sugerida?\n\n` +
+      (fora > 0
+        ? `${fora} linha(s) sem sugestão ficam de fora. Elas esperam por você na aba ` +
+          `"Sem sugestão", onde dá para criar o padrão OFX de cada uma.\n\n`
+        : '') +
       `Você pode ajustar depois em Lançamentos.`
     );
     if (!ok) return;
@@ -330,17 +336,17 @@ function TelaConciliacao({ importId, onVoltar }) {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {summary?.pendente > 0 && (
+            {summary?.comSugestao > 0 && (
               <button
                 onClick={bulkConciliarPendentes}
                 disabled={bulkBusy}
                 className="px-3 py-1.5 rounded-lg bg-navy-700 hover:bg-navy-800 disabled:opacity-60
                            text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
-                title="Cria lançamentos automaticamente para todas as pendências"
+                title="Cria os lançamentos das pendências que têm categoria sugerida"
               >
                 {bulkBusy
                   ? (<><Loader2 size={12} className="animate-spin"/> Conciliando...</>)
-                  : (<><CheckCircle2 size={12}/> Conciliar todas ({summary.pendente})</>)
+                  : (<><CheckCircle2 size={12}/> Conciliar com sugestão ({summary.comSugestao})</>)
                 }
               </button>
             )}
@@ -367,8 +373,31 @@ function TelaConciliacao({ importId, onVoltar }) {
                 Reveja as pendências que sobraram.
               </p>
             )}
+            {bulkResult.semSugestao > 0 && (
+              <button
+                onClick={() => { setFilterStatus('sem_sugestao'); setBulkResult(null); }}
+                className="text-xs text-emerald-700 underline mt-0.5"
+              >
+                {bulkResult.semSugestao} linha(s) ficaram de fora por não ter sugestão — ver agora
+              </button>
+            )}
           </div>
           <button onClick={() => setBulkResult(null)} className="text-emerald-700 hover:text-emerald-900">
+            <X size={14}/>
+          </button>
+        </div>
+      )}
+
+      {padraoResult !== null && (
+        <div className="card border-indigo-200 bg-indigo-50 px-4 py-3 text-sm flex items-start gap-2">
+          <SlidersHorizontal size={16} className="text-indigo-600 mt-0.5"/>
+          <p className="flex-1 text-indigo-800">
+            Padrão salvo.{' '}
+            {padraoResult > 0
+              ? `${padraoResult} linha(s) de extrato ainda pendentes passaram a ter sugestão, aqui e nas outras importações.`
+              : 'Nenhuma linha pendente mudou de sugestão com ele.'}
+          </p>
+          <button onClick={() => setPadraoResult(null)} className="text-indigo-700 hover:text-indigo-900">
             <X size={14}/>
           </button>
         </div>
@@ -377,9 +406,12 @@ function TelaConciliacao({ importId, onVoltar }) {
       {/* Tabs por status */}
       <div className="card p-1 flex gap-1">
         {[
-          { id: 'pendente',   label: 'Pendentes',   icon: Clock,         count: summary.pendente   },
-          { id: 'conciliado', label: 'Conciliadas', icon: CheckCircle2,  count: summary.conciliado },
-          { id: 'ignorado',   label: 'Ignoradas',   icon: MinusCircle,   count: summary.ignorado   },
+          { id: 'pendente',     label: 'Pendentes',    icon: Clock,             count: summary.pendente   },
+          // As pendentes que nenhum padrao alcanca. E a fila de trabalho: cada
+          // uma dessas precisa de um padrao novo ou de lancamento manual.
+          { id: 'sem_sugestao', label: 'Sem sugestão', icon: SlidersHorizontal, count: summary.semSugestao || 0 },
+          { id: 'conciliado',   label: 'Conciliadas',  icon: CheckCircle2,      count: summary.conciliado },
+          { id: 'ignorado',     label: 'Ignoradas',    icon: MinusCircle,       count: summary.ignorado   },
         ].map((t) => {
           const Icon = t.icon;
           const active = filterStatus === t.id;
@@ -425,14 +457,18 @@ function TelaConciliacao({ importId, onVoltar }) {
             title={
               filterStatus === 'pendente' && summary.pendente === 0
                 ? 'Tudo conciliado! 🎉'
-                : 'Nenhuma entry nesta categoria'
+                : filterStatus === 'sem_sugestao'
+                  ? 'Toda pendência tem sugestão'
+                  : 'Nenhuma entry nesta categoria'
             }
             description={
               filterStatus === 'pendente' && summary.pendente === 0
                 ? 'Todas as transações deste extrato foram conciliadas.'
-                : searchTerm
-                  ? 'Nenhuma entry corresponde à sua busca.'
-                  : `Nenhuma entry com status "${filterStatus}".`
+                : filterStatus === 'sem_sugestao'
+                  ? 'Todo histórico pendente deste extrato casa com algum padrão OFX. Dá para conciliar em massa.'
+                  : searchTerm
+                    ? 'Nenhuma entry corresponde à sua busca.'
+                    : `Nenhuma entry com status "${filterStatus}".`
             }
           />
         </div>
@@ -478,8 +514,9 @@ function TelaConciliacao({ importId, onVoltar }) {
           entry={patternEntry}
           padroes={padroes}
           onClose={() => setPatternEntry(null)}
-          onSaved={() => {
+          onSaved={(sugestoesAtualizadas) => {
             setPatternEntry(null);
+            setPadraoResult(sugestoesAtualizadas);
             carregarPadroes();
             carregar();
           }}
@@ -520,6 +557,8 @@ function TelaConciliacao({ importId, onVoltar }) {
 
 function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgnorar, onDesvincular, padroes = [], onPadrao }) {
   const padraoCasado = encontrarPadrao(entry, padroes);
+  // Linha que ninguém alcança: nem sugestão gravada, nem padrão que case.
+  const semPadrao = entry.status === 'pendente' && !entry.suggestedCategory && !padraoCasado;
   const cor = STATUS_COR[entry.status] || STATUS_COR.pendente;
   const isCredito = entry.tipo === 'credito';
   const Icon = isCredito ? TrendingUp : TrendingDown;
@@ -575,6 +614,13 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
               </div>
             )}
 
+            {entry.status === 'pendente' && !entry.suggestedCategory && !padraoCasado && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-600">
+                <Tag size={11} />
+                Sem sugestão: nenhum padrão OFX casa com este histórico.
+              </div>
+            )}
+
             {entry.status === 'pendente' && padraoCasado && (
               <div className="mt-1 flex items-center gap-1.5 text-[11px] text-indigo-500">
                 <SlidersHorizontal size={11} />
@@ -621,10 +667,13 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
                 >
                   <Link2 size={11} /> Vincular
                 </button>
+                {/* Sem sugestão nem padrão, o caminho que resolve de vez é
+                    criar o padrão: ele vale para esta linha e para as proximas
+                    importacoes. Por isso ele é que vira o botão em destaque. */}
                 <button
                   onClick={onCriar}
                   disabled={busy}
-                  className="btn-primary text-xs flex items-center gap-1 px-2.5 py-1.5 disabled:opacity-50"
+                  className={`${semPadrao ? 'btn-secondary' : 'btn-primary'} text-xs flex items-center gap-1 px-2.5 py-1.5 disabled:opacity-50`}
                   title="Criar lançamento novo a partir desta entry"
                 >
                   <Plus size={11} /> Criar lançamento
@@ -632,11 +681,11 @@ function EntryCard({ entry, busy, onVincular, onCriar, onIgnorar, onDesfazerIgno
                 <button
                   onClick={onPadrao}
                   disabled={busy}
-                  className="btn-secondary text-xs flex items-center gap-1 px-2.5 py-1.5 disabled:opacity-50"
+                  className={`${semPadrao ? 'btn-primary' : 'btn-secondary'} text-xs flex items-center gap-1 px-2.5 py-1.5 disabled:opacity-50`}
                   title={padraoCasado ? 'Editar o padrão OFX deste histórico' : 'Criar um padrão OFX para este histórico'}
                 >
                   <SlidersHorizontal size={11} />
-                  {padraoCasado ? 'Editar padrão' : 'Padrão'}
+                  {padraoCasado ? 'Editar padrão' : 'Criar padrão'}
                 </button>
                 <button
                   onClick={onIgnorar}
@@ -1161,12 +1210,12 @@ function PatternModal({ entry, padroes, onClose, onSaved }) {
         categoryId: categoryId || null,
         complementoAuto: complementoAuto.trim() || null,
       };
-      if (isEdicao) {
-        await api.put(`/ofx-patterns/${existente.id}`, payload);
-      } else {
-        await api.post('/ofx-patterns', payload);
-      }
-      onSaved();
+      // O backend reaplica o padrao nas linhas pendentes e devolve quantas
+      // passaram a ter sugestao — inclusive de outras importacoes.
+      const { data: resp } = isEdicao
+        ? await api.put(`/ofx-patterns/${existente.id}`, payload)
+        : await api.post('/ofx-patterns', payload);
+      onSaved(resp.data?.sugestoesAtualizadas || 0);
     } catch (err) {
       setErrorMsg(err.response?.data?.error || 'Erro ao salvar o padrão.');
       setSaving(false);
